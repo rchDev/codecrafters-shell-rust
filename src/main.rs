@@ -42,7 +42,7 @@ impl FromStr for Command {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.trim() {
             "exit" => Ok(Command::Exit),
-            other => Err(format!("command not found: {other}")),
+            other => Err(format!("{other}: command not found")),
         }
     }
 }
