@@ -32,6 +32,9 @@ fn main() {
             Command::Echo(str) => {
                 println!("{str}")
             }
+            Command::Type(inner) => {
+                println!("{inner} is a shell builtin")
+            }
         }
     }
 }
@@ -39,6 +42,7 @@ fn main() {
 enum Command {
     Exit,
     Echo(String),
+    Type(String),
 }
 impl FromStr for Command {
     type Err = String;
@@ -50,12 +54,34 @@ impl FromStr for Command {
             return Err(": command not found".to_string());
         };
 
-        let rest = s.collect::<Vec<&str>>().join(" ");
+        let rest = s.collect::<Vec<&str>>();
 
-        match command {
+        let command = match command {
             "exit" => Ok(Command::Exit),
-            "echo" => Ok(Command::Echo(rest)),
+            "echo" => Ok(Command::Echo(rest.join(" "))),
+            "type" => {
+                if rest.len() > 1 || rest.len() == 0 {
+                    return Err(format!("{}: not found", rest.join(" ")));
+                }
+
+                let inner = rest[0];
+                if !Command::is_valid(inner) {
+                    return Err(format!("{inner}: not found"));
+                }
+
+                Ok(Command::Type(inner.to_string()))
+            }
             other => Err(format!("{other}: command not found")),
+        };
+        command
+    }
+}
+
+impl Command {
+    fn is_valid(s: &str) -> bool {
+        match s {
+            "exit" | "echo" | "type" => true,
+            _ => false,
         }
     }
 }
