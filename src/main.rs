@@ -4,19 +4,27 @@ use std::process;
 
 fn main() {
     // TODO: Uncomment the code below to pass the first stage
-    print!("$ ");
-    io::stdout().flush().unwrap();
+    'main_loop: loop {
+        print!("$ ");
+        io::stdout().flush().unwrap();
 
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).unwrap_or_else(|err| {
-        eprintln!("Failed to read user input: {err}");
-        process::exit(1);
-    });
+        let mut input = String::new();
+        match io::stdin().read_line(&mut input) {
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("Failed to read user input: {e}");
+                continue 'main_loop;
+            }
+        };
 
-    let _command = Command::build(input).unwrap_or_else(|err| {
-        eprintln!("{err}");
-        process::exit(1);
-    });
+        let _command = match Command::build(input) {
+            Ok(command) => command,
+            Err(e) => {
+                eprintln!("{e}");
+                continue 'main_loop;
+            }
+        };
+    }
 }
 
 struct Command {
