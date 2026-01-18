@@ -1,6 +1,6 @@
 #[allow(unused_imports)]
 use std::io::{self, Write, stdin};
-use std::process;
+use std::{process, str::FromStr};
 
 fn main() {
     // TODO: Uncomment the code below to pass the first stage
@@ -17,24 +17,32 @@ fn main() {
             }
         };
 
-        let _command = match Command::build(input) {
+        let command = match Command::from_str(&input) {
             Ok(command) => command,
             Err(e) => {
                 eprintln!("{e}");
                 continue 'main_loop;
             }
         };
+
+        match command {
+            Command::Exit => {
+                process::exit(0);
+            }
+        }
     }
 }
 
-struct Command {
-    name: String,
+enum Command {
+    Exit,
 }
+impl FromStr for Command {
+    type Err = String;
 
-impl Command {
-    fn build(input: String) -> Result<Self, String> {
-        let command = input.trim();
-
-        Err(format!("{command}: command not found"))
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim() {
+            "exit" => Ok(Command::Exit),
+            other => Err(format!("command not found: {other}")),
+        }
     }
 }
