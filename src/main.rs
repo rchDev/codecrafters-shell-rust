@@ -29,19 +29,32 @@ fn main() {
             Command::Exit => {
                 process::exit(0);
             }
+            Command::Echo(str) => {
+                println!("{str}")
+            }
         }
     }
 }
 
 enum Command {
     Exit,
+    Echo(String),
 }
 impl FromStr for Command {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.trim() {
+        let mut s = s.trim().split(" ");
+
+        let Some(command) = s.next() else {
+            return Err(": command not found".to_string());
+        };
+
+        let rest = s.collect::<Vec<&str>>().join(" ");
+
+        match command {
             "exit" => Ok(Command::Exit),
+            "echo" => Ok(Command::Echo(rest)),
             other => Err(format!("{other}: command not found")),
         }
     }
