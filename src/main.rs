@@ -54,6 +54,7 @@ enum Command {
     Exit,
     Echo,
     Type,
+    Pwd,
 }
 
 impl FromStr for Command {
@@ -64,6 +65,7 @@ impl FromStr for Command {
             "exit" => Ok(Command::Exit),
             "echo" => Ok(Command::Echo),
             "type" => Ok(Command::Type),
+            "pwd" => Ok(Command::Pwd),
             other => Err(format!("{other}: command not found")),
         }
     }
@@ -97,6 +99,10 @@ impl Command {
             }
             Command::Type => {
                 Self::execute_type_command(args);
+            }
+            Command::Pwd => {
+                let cwd = env::current_dir().unwrap();
+                println!("{}", cwd.display())
             }
         }
     }
