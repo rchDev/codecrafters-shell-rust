@@ -20,61 +20,52 @@ fn main() {
             }
         };
 
-        let input = input.trim();
-        match Command::from_str(input) {
-            Ok(command) => command.execute(),
-            Err(e) => {
-                eprintln!("{e}");
-                continue 'main_loop;
-            }
+        let mut args = input.trim().split(" ");
+        let Some(search_item) = args.next() else {
+            eprintln!(": command not found");
+            continue 'main_loop;
+        };
+
+        match Command::from_str(search_item) {
+            Ok(command) => command.execute(&args.collect()),
+            Err(parsing_err) => match get_executable_path(search_item) {
+                Some(exec_path) => {
+                    let filename = exec_path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or_default();
+
+                    let _ = process::Command::new(filename)
+                        .args(args)
+                        .stdin(process::Stdio::inherit())
+                        .stdout(process::Stdio::inherit())
+                        .stderr(process::Stdio::inherit())
+                        .status();
+                }
+                None => {
+                    eprintln!("{parsing_err}");
+                }
+            },
         };
     }
 }
 
 enum Command {
     Exit,
-    Echo(String),
-    Type(TypeItem),
-}
-
-enum TypeItem {
-    BuiltIn(String),
-    PathExec(String, PathBuf),
+    Echo,
+    Type,
 }
 
 impl FromStr for Command {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut s = s.split(" ");
-
-        let Some(command) = s.next() else {
-            return Err(": command not found".to_string());
-        };
-
-        let rest = s.collect::<Vec<&str>>();
-
-        let command = match command {
+        match s {
             "exit" => Ok(Command::Exit),
-            "echo" => Ok(Command::Echo(rest.join(" "))),
-            "type" => {
-                if rest.len() > 1 || rest.len() == 0 {
-                    return Err(format!("{}: not found", rest.join(" ")));
-                }
-
-                let inner = rest[0];
-
-                if Command::is_valid(inner) {
-                    Ok(Command::Type(TypeItem::BuiltIn(inner.to_string())))
-                } else {
-                    get_executable_path(inner)
-                        .map(|p| Command::Type(TypeItem::PathExec(inner.to_string(), p)))
-                        .ok_or_else(|| format!("{inner}: not found"))
-                }
-            }
+            "echo" => Ok(Command::Echo),
+            "type" => Ok(Command::Type),
             other => Err(format!("{other}: command not found")),
-        };
-        command
+        }
     }
 }
 
@@ -96,28 +87,41 @@ fn is_executable(path: &Path) -> bool {
 }
 
 impl Command {
-    fn is_valid(s: &str) -> bool {
-        match s {
-            "exit" | "echo" | "type" => true,
-            _ => false,
-        }
-    }
-
-    fn execute(&self) {
+    fn execute(&self, args: &Vec<&str>) {
         match self {
             Command::Exit => {
                 process::exit(0);
             }
-            Command::Echo(str) => {
-                println!("{str}")
+            Command::Echo => {
+                Self::execute_echo_command(args);
             }
-            Command::Type(TypeItem::BuiltIn(inner)) => {
-                println!("{inner} is a shell builtin")
-            }
-            Command::Type(TypeItem::PathExec(command, path)) => {
-                let path = path.to_str().unwrap_or_default();
-                println!("{command} is {path}")
+            Command::Type => {
+                Self::execute_type_command(args);
             }
         }
+    }
+
+    fn execute_type_command(args: &Vec<&str>) -> () {
+        if args.len() == 0 || args.len() > 1 {
+            eprintln!("{}: not found", args.join(" "));
+            return;
+        }
+
+        if let Ok(_) = Command::from_str(args[0]) {
+            println!("{} is a shell builtin", args[0]);
+            return;
+        }
+
+        match get_executable_path(args[0]) {
+            Some(exec_path) => {
+                println!("{} is {}", args[0], exec_path.display());
+            }
+            None => {
+                eprintln!("{}: not found", args[0])
+            }
+        }
+    }
+    fn execute_echo_command(args: &Vec<&str>) {
+        println!("{}", args.join(" "));
     }
 }
