@@ -1,12 +1,13 @@
+use std::fmt;
 #[allow(unused_imports)]
 use std::io::{self, Write, stdin};
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
-use std::{env, fs, path::Path, process, str::FromStr};
+use std::{env, fs, path::Path, process};
 
 fn main() {
     // TODO: Uncomment the code below to pass the first stage
-
+    let mut shell = Shell::new();
     'main_loop: loop {
         print!("$ ");
         io::stdout().flush().unwrap();
@@ -20,55 +21,22 @@ fn main() {
             }
         };
 
-        let mut args = input.trim().split(" ");
-        let Some(search_item) = args.next() else {
-            eprintln!(": command not found");
-            continue 'main_loop;
-        };
-
-        match Command::from_str(search_item) {
-            Ok(command) => command.execute(&args.collect()),
-            Err(parsing_err) => match get_executable_path(search_item) {
-                Some(exec_path) => {
-                    let filename = exec_path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or_default();
-
-                    let _ = process::Command::new(filename)
-                        .args(args)
-                        .stdin(process::Stdio::inherit())
-                        .stdout(process::Stdio::inherit())
-                        .stderr(process::Stdio::inherit())
-                        .status();
-                }
-                None => {
-                    eprintln!("{parsing_err}");
-                }
-            },
-        };
+        let cmd = Command::parse(&input);
+        shell.exec_command(cmd);
     }
 }
 
 enum Command {
     Exit,
-    Echo,
-    Type,
+    Echo(String),
+    Type(Box<Command>),
     Pwd,
-}
-
-impl FromStr for Command {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "exit" => Ok(Command::Exit),
-            "echo" => Ok(Command::Echo),
-            "type" => Ok(Command::Type),
-            "pwd" => Ok(Command::Pwd),
-            other => Err(format!("{other}: command not found")),
-        }
-    }
+    Cd(PathBuf),
+    External {
+        exec_path: PathBuf,
+        args: Vec<String>,
+    },
+    None(String),
 }
 
 fn get_executable_path(input: &str) -> Option<PathBuf> {
@@ -89,45 +57,114 @@ fn is_executable(path: &Path) -> bool {
 }
 
 impl Command {
-    fn execute(&self, args: &Vec<&str>) {
+    fn parse(s: &str) -> Command {
+        let mut args = s.trim().split(" ");
+        let Some(cmd) = args.next() else {
+            return Command::None("".to_string());
+        };
+        let args: Vec<&str> = args.collect();
+        match cmd {
+            "exit" => Command::Exit,
+            "echo" => Command::Echo(args.join(" ")),
+            "type" => {
+                if args.len() == 0 || args.len() > 1 {
+                    return Command::Type(Box::new(Command::None(args.join(" "))));
+                }
+                let inner_cmd = Command::parse(args[0]);
+                Command::Type(Box::new(inner_cmd))
+            }
+            "pwd" => Command::Pwd,
+            "cd" => Command::Cd(PathBuf::from(args.join(" "))),
+            other => match get_executable_path(other) {
+                Some(exec_path) => Command::External {
+                    exec_path,
+                    args: args.into_iter().map(String::from).collect(),
+                },
+                None => Command::None(s.trim().to_string()),
+            },
+        }
+    }
+}
+
+impl fmt::Display for Command {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Command::Exit => write!(f, "exit"),
+            Command::Pwd => write!(f, "pwd"),
+            Command::Echo(_) => write!(f, "echo"),
+            Command::Cd(_) => write!(f, "cd"),
+            Command::Type(_) => write!(f, "type"),
+            Command::External { exec_path, .. } => {
+                write!(
+                    f,
+                    "{} is {}",
+                    exec_path.file_name().unwrap_or_default().display(),
+                    exec_path.display()
+                )
+            }
+            Command::None(name) => write!(f, "{name}"),
+        }
+    }
+}
+struct Shell {
+    working_dir: PathBuf,
+}
+
+impl Shell {
+    /// Returns
+    pub fn new() -> Self {
+        Self {
+            working_dir: env::current_dir().unwrap(),
+        }
+    }
+
+    pub fn exec_command(&mut self, cmd: Command) {
+        match cmd {
+            Command::Cd(exec_path) => {
+                match env::set_current_dir(&exec_path) {
+                    Ok(_) => self.change_dir(env::current_dir().unwrap()),
+                    Err(_) => {
+                        eprintln!("cd: {}: No such file or directory", exec_path.display())
+                    }
+                };
+            }
+            Command::Echo(msg) => {
+                println!("{msg}");
+            }
+            Command::External { exec_path, args } => {
+                let filename = exec_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or_default();
+
+                let _ = process::Command::new(filename)
+                    .args(args)
+                    .stdin(process::Stdio::inherit())
+                    .stdout(process::Stdio::inherit())
+                    .stderr(process::Stdio::inherit())
+                    .status();
+            }
+            Command::Type(inner) => match inner.as_ref() {
+                Command::None(name) => println!("{name}: not found"),
+                Command::External { exec_path, args: _ } => println!(
+                    "{} is {}",
+                    exec_path.file_name().unwrap_or_default().display(),
+                    exec_path.display()
+                ),
+                builtin => println!("{builtin} is a shell builtin"),
+            },
+            Command::Pwd => {
+                println!("{}", self.working_dir.display());
+            }
             Command::Exit => {
                 process::exit(0);
             }
-            Command::Echo => {
-                Self::execute_echo_command(args);
-            }
-            Command::Type => {
-                Self::execute_type_command(args);
-            }
-            Command::Pwd => {
-                let cwd = env::current_dir().unwrap();
-                println!("{}", cwd.display())
+            Command::None(cmd_name) => {
+                println!("{cmd_name}: command not found")
             }
         }
     }
-
-    fn execute_type_command(args: &Vec<&str>) -> () {
-        if args.len() == 0 || args.len() > 1 {
-            eprintln!("{}: not found", args.join(" "));
-            return;
-        }
-
-        if let Ok(_) = Command::from_str(args[0]) {
-            println!("{} is a shell builtin", args[0]);
-            return;
-        }
-
-        match get_executable_path(args[0]) {
-            Some(exec_path) => {
-                println!("{} is {}", args[0], exec_path.display());
-            }
-            None => {
-                eprintln!("{}: not found", args[0])
-            }
-        }
-    }
-    fn execute_echo_command(args: &Vec<&str>) {
-        println!("{}", args.join(" "));
+    fn change_dir(&mut self, path: PathBuf) {
+        self.working_dir = path;
     }
 }
