@@ -120,7 +120,10 @@ impl Shell {
 
     pub fn exec_command(&mut self, cmd: Command) {
         match cmd {
-            Command::Cd(exec_path) => {
+            Command::Cd(mut exec_path) => {
+                if exec_path.eq("~") {
+                    exec_path = env::home_dir().unwrap()
+                }
                 match env::set_current_dir(&exec_path) {
                     Ok(_) => self.change_dir(env::current_dir().unwrap()),
                     Err(_) => {
