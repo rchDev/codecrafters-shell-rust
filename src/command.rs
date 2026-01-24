@@ -92,15 +92,9 @@ impl Command {
             match (&current_meta, new_char, &expansion_blocker) {
                 (None, None, _) => {
                     out.push(c);
-                    println!("after: {c}");
-                    println!("out: {out}");
-                    println!("expansion_buf: {expansion_buf}");
                 }
                 (None, Some(meta_char), None) => {
                     current_meta = Some(meta_char);
-                    println!("after: {c}");
-                    println!("out: {out}");
-                    println!("expansion_buf: {expansion_buf}");
                 }
                 (_, Some(new), Some(expansion_blocker)) => {
                     if expansion_blocker.allows_meta_char(&new) {
@@ -108,41 +102,23 @@ impl Command {
                     } else {
                         out.push(c);
                     }
-
-                    println!("after: {c}");
-                    println!("out: {out}");
-                    println!("expansion_buf: {expansion_buf}");
                 }
                 (Some(MetaChar::Whitespace(_)), Some(MetaChar::Whitespace(_)), _) => {}
                 (Some(prev), ws_char @ Some(MetaChar::Whitespace(_)), _) => {
                     prev.expand(&mut expansion_buf, &mut out);
                     current_meta = ws_char;
-                    println!("after: {c}");
-                    println!("out: {out}");
-                    println!("expansion_buf: {expansion_buf}");
                 }
                 (Some(MetaChar::Whitespace(_)), new_meta @ Some(_), _) => {
                     out.push(' ');
                     current_meta = new_meta;
-
-                    println!("after: {c}");
-                    println!("out: {out}");
-                    println!("expansion_buf: {expansion_buf}");
                 }
                 (Some(MetaChar::Whitespace(_)), None, _) => {
                     out.push(' ');
                     out.push(c);
                     current_meta = None;
-
-                    println!("after: {c}");
-                    println!("out: {out}");
-                    println!("expansion_buf: {expansion_buf}");
                 }
                 (Some(_), _, _) => {
                     expansion_buf.push(c);
-                    println!("after: {c}");
-                    println!("out: {out}");
-                    println!("expansion_buf: {expansion_buf}");
                 }
             }
         }
