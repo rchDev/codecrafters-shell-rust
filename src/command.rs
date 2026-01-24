@@ -10,10 +10,11 @@ use meta::MetaChar;
 
 use crate::command::meta::ExpansionBlocker;
 
+#[derive(Debug)]
 pub enum Command {
     Exit,
     Echo(String),
-    Type(Box<Command>),
+    Type(Vec<Command>),
     Pwd,
     Cd(PathBuf),
     External {
@@ -24,33 +25,101 @@ pub enum Command {
 }
 
 impl Command {
-    pub fn parse(s: &str) -> Command {
-        let expanded_s = Command::expand_meta_chars(s);
-        let mut args = expanded_s.trim().split(" ");
-        let Some(cmd) = args.next() else {
-            return Command::None("".to_string());
+    pub fn parse(input: &str) -> Command {
+        let expanded_input = Command::expand_meta_chars(input);
+        let expanded_trimmed_input = expanded_input.trim();
+
+        let (command, args) = match expanded_trimmed_input.split_once(char::is_whitespace) {
+            Some((cmd, rest)) => (cmd, rest),
+            None => (expanded_trimmed_input, ""),
         };
-        let args: Vec<&str> = args.collect();
-        match cmd {
+
+        // let args = Command::split_args(args);
+        match command {
             "exit" => Command::Exit,
-            "echo" => Command::Echo(args.join(" ")),
+            "echo" => Command::Echo(args.to_string()),
             "type" => {
-                if args.len() == 0 || args.len() > 1 {
-                    return Command::Type(Box::new(Command::None(args.join(" "))));
-                }
-                let inner_cmd = Command::parse(args[0]);
-                Command::Type(Box::new(inner_cmd))
+                let inner_commands: Vec<Command> = Command::split_args(args)
+                    .iter()
+                    .map(|arg| {
+                        let clean_arg = Command::strip_outer_quotes(arg);
+                        Command::parse(&clean_arg)
+                    })
+                    .collect();
+                Command::Type(inner_commands)
             }
             "pwd" => Command::Pwd,
-            "cd" => Command::Cd(PathBuf::from(args.join(" "))),
+            "cd" => Command::Cd(PathBuf::from(args)),
             other => match Command::get_executable_path(other) {
                 Some(exec_path) => Command::External {
                     exec_path,
-                    args: args.into_iter().map(String::from).collect(),
+                    args: Command::split_args(args)
+                        .into_iter()
+                        .map(String::from)
+                        .collect(),
                 },
-                None => Command::None(expanded_s.trim().to_string()),
+                None => Command::None(expanded_trimmed_input.to_string()),
             },
         }
+    }
+
+    fn strip_outer_quotes(input: &str) -> &str {
+        input
+            .strip_prefix('\'')
+            .and_then(|stripped| stripped.strip_suffix('\''))
+            .or_else(|| {
+                input
+                    .strip_prefix('"')
+                    .and_then(|stripped| stripped.strip_suffix('"'))
+            })
+            .unwrap_or(input)
+    }
+
+    fn split_args(input: &str) -> Vec<&str> {
+        if input.is_empty() {
+            return vec![input];
+        }
+        let mut output: Vec<&str> = Vec::new();
+        let mut current_split: Option<char> = None;
+        let mut word_start: usize = 0;
+
+        for (i, c) in input.char_indices() {
+            if let Some(split_char) = current_split
+                && split_char == c
+            {
+                let slice = &input[word_start..=i];
+                if !slice.is_empty() {
+                    output.push(slice);
+                }
+                current_split = None;
+                word_start = i + 1;
+            } else if current_split.is_none() && c.is_whitespace() {
+                let slice = &input[word_start..i];
+                if !slice.is_empty() {
+                    output.push(slice)
+                }
+                word_start = i + 1;
+            } else if current_split.is_none() && (c == '\'' || c == '"') {
+                current_split = Some(c);
+                let slice = &input[word_start..i];
+                if !slice.is_empty() {
+                    output.push(slice);
+                }
+                word_start = i;
+            }
+        }
+
+        if word_start < input.len() - 1 {
+            let slice = &input[word_start..];
+            if !slice.is_empty() {
+                output.push(slice);
+            }
+        }
+        if output.is_empty() {
+            output.push(&input[..])
+        }
+
+        output
     }
 
     fn expand_meta_chars(s: &str) -> String {
@@ -63,11 +132,17 @@ impl Command {
         while let Some(c) = chars.next() {
             // set expansion blocker
             let new_expansion_blocker = ExpansionBlocker::try_from(c).ok();
-            match (&expansion_blocker, new_expansion_blocker) {
+            match (&expansion_blocker, &new_expansion_blocker) {
                 (None, None) => {}
                 (Some(_), None) => {}
-                (Some(blocker), Some(new_blocker)) if *blocker == new_blocker => {
+                (Some(blocker), Some(new_blocker)) if *blocker == *new_blocker => {
                     expansion_blocker = None;
+
+                    if let Some(meta_char) = &current_meta {
+                        meta_char.expand(&mut expansion_buf, &mut out);
+                        current_meta = None;
+                    }
+                    out.push(new_blocker.name());
                     continue;
                 }
                 (Some(_), Some(_)) => {
@@ -83,7 +158,8 @@ impl Command {
                         }
                         current_meta = None;
                     }
-                    expansion_blocker = Some(new_blocker);
+                    expansion_blocker = Some(*new_blocker);
+                    out.push(new_blocker.name());
                     continue;
                 }
             }

@@ -22,12 +22,14 @@ impl MetaChar {
     pub fn expand(&self, expansion_buf: &mut String, out: &mut String) {
         match self {
             Self::Dollar => {
-                println!("{expansion_buf}");
                 let var = env::var(expansion_buf).unwrap();
                 out.push_str(&var)
             }
             Self::Star => {}
-            Self::Tilde => {}
+            Self::Tilde => {
+                let home_dir = env::home_dir().unwrap();
+                out.push_str(home_dir.to_str().unwrap());
+            }
             Self::Whitespace(_) => {}
         }
     }
@@ -46,7 +48,7 @@ impl TryFrom<char> for MetaChar {
     }
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone, Copy)]
 pub enum ExpansionBlocker {
     Single,
     Double,
@@ -60,6 +62,12 @@ impl ExpansionBlocker {
                 MetaChar::Dollar => true,
                 _ => false,
             },
+        }
+    }
+    pub fn name(&self) -> char {
+        match self {
+            Self::Single => '\'',
+            Self::Double => '"',
         }
     }
 }

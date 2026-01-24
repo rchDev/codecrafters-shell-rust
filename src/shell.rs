@@ -25,10 +25,7 @@ impl Shell {
 
     pub fn exec_command(&mut self, cmd: Command) {
         match cmd {
-            Command::Cd(mut exec_path) => {
-                if exec_path.eq("~") {
-                    exec_path = env::home_dir().unwrap()
-                }
+            Command::Cd(exec_path) => {
                 match env::set_current_dir(&exec_path) {
                     Ok(_) => self.change_dir(env::current_dir().unwrap()),
                     Err(_) => {
@@ -37,30 +34,39 @@ impl Shell {
                 };
             }
             Command::Echo(msg) => {
-                println!("{msg}");
+                let clean_msg: String = msg.chars().filter(|&c| c != '"' && c != '\'').collect();
+                println!("{clean_msg}");
             }
             Command::External { exec_path, args } => {
+                let clean_args: Vec<String> = args
+                    .iter()
+                    .map(|s| s.chars().filter(|&c| c != '"' && c != '\'').collect())
+                    .collect();
                 let filename = exec_path
                     .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or_default();
 
                 let _ = StdProcCmd::new(filename)
-                    .args(args)
+                    .args(clean_args)
                     .stdin(Stdio::inherit())
                     .stdout(Stdio::inherit())
                     .stderr(Stdio::inherit())
                     .status();
             }
-            Command::Type(inner) => match inner.as_ref() {
-                Command::None(name) => println!("{name}: not found"),
-                Command::External { exec_path, args: _ } => println!(
-                    "{} is {}",
-                    exec_path.file_name().unwrap_or_default().display(),
-                    exec_path.display()
-                ),
-                builtin => println!("{builtin} is a shell builtin"),
-            },
+            Command::Type(inner_commands) => {
+                for command in inner_commands {
+                    match command {
+                        Command::None(name) => println!("{name}: not found"),
+                        Command::External { exec_path, args: _ } => println!(
+                            "{} is {}",
+                            exec_path.file_name().unwrap_or_default().display(),
+                            exec_path.display()
+                        ),
+                        builtin => println!("{builtin} is a shell builtin"),
+                    }
+                }
+            }
             Command::Pwd => {
                 println!("{}", self.working_dir.display());
             }
