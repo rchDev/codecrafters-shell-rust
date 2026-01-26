@@ -34,21 +34,16 @@ impl Shell {
                 };
             }
             Command::Echo(msg) => {
-                let clean_msg: String = msg.chars().filter(|&c| c != '"' && c != '\'').collect();
-                println!("{clean_msg}");
+                println!("{}", msg.trim());
             }
             Command::External { exec_path, args } => {
-                let clean_args: Vec<String> = args
-                    .iter()
-                    .map(|s| s.chars().filter(|&c| c != '"' && c != '\'').collect())
-                    .collect();
                 let filename = exec_path
                     .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or_default();
 
                 let _ = StdProcCmd::new(filename)
-                    .args(clean_args)
+                    .args(args)
                     .stdin(Stdio::inherit())
                     .stdout(Stdio::inherit())
                     .stderr(Stdio::inherit())

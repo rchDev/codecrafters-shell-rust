@@ -5,7 +5,6 @@ pub enum MetaChar {
     Dollar,
     Star,
     Tilde,
-    Whitespace(char),
 }
 
 impl MetaChar {
@@ -15,22 +14,18 @@ impl MetaChar {
             MetaChar::Dollar => '$',
             MetaChar::Star => '*',
             MetaChar::Tilde => '~',
-            MetaChar::Whitespace(val) => *val,
         }
     }
 
-    pub fn expand(&self, expansion_buf: &mut String, out: &mut String) {
+    pub fn expand(&self, expansion_buf: &str) -> String {
         match self {
-            Self::Dollar => {
-                let var = env::var(expansion_buf).unwrap();
-                out.push_str(&var)
-            }
-            Self::Star => {}
+            Self::Dollar => env::var(expansion_buf).unwrap(),
+            Self::Star => self.name().to_string(),
             Self::Tilde => {
+                dbg!("IM HERE!!!");
                 let home_dir = env::home_dir().unwrap();
-                out.push_str(home_dir.to_str().unwrap());
+                home_dir.into_os_string().into_string().unwrap()
             }
-            Self::Whitespace(_) => {}
         }
     }
 }
@@ -42,19 +37,19 @@ impl TryFrom<char> for MetaChar {
             '$' => Ok(MetaChar::Dollar),
             '*' => Ok(MetaChar::Star),
             '~' => Ok(MetaChar::Tilde),
-            value if value.is_whitespace() => Ok(MetaChar::Whitespace(value)),
             _ => Err(()),
         }
     }
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]
-pub enum ExpansionBlocker {
+pub enum Separator {
     Single,
     Double,
+    Whitespace(char),
 }
 
-impl ExpansionBlocker {
+impl Separator {
     pub fn allows_meta_char(&self, meta_char: &MetaChar) -> bool {
         match self {
             Self::Single => false,
@@ -62,22 +57,27 @@ impl ExpansionBlocker {
                 MetaChar::Dollar => true,
                 _ => false,
             },
+            Self::Whitespace(_) => true,
         }
     }
+
+    #[allow(dead_code)]
     pub fn name(&self) -> char {
         match self {
             Self::Single => '\'',
             Self::Double => '"',
+            Self::Whitespace(val) => *val,
         }
     }
 }
 
-impl TryFrom<char> for ExpansionBlocker {
+impl TryFrom<char> for Separator {
     type Error = ();
     fn try_from(value: char) -> Result<Self, Self::Error> {
         match value {
             '\'' => Ok(Self::Single),
             '"' => Ok(Self::Double),
+            _ if value.is_whitespace() => Ok(Self::Whitespace(value)),
             _ => Err(()),
         }
     }
