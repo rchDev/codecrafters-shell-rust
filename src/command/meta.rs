@@ -264,9 +264,13 @@ impl<'a> MetaSymbolExpander<'a> {
             s.temp_buffer.push(x);
         };
 
-        let fn_for_separator = |s: &mut Self, _: Separator| {
-            s.previous_mode = s.current_mode;
-            s.current_mode = MetaSymbolExpanderMode::Regular;
+        let fn_for_separator = |s: &mut Self, new_sep: Separator| {
+            if new_sep == sep {
+                s.previous_mode = s.current_mode;
+                s.current_mode = MetaSymbolExpanderMode::Regular;
+            } else {
+                s.temp_buffer.push(new_sep.name());
+            }
         };
 
         self.act_on_meta_or_separator_or_else(
