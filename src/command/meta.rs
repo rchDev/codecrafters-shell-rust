@@ -120,8 +120,13 @@ impl<'a> MetaSymbolExpander<'a> {
     fn next_mode(&mut self) {
         let next_char = self.chars.next();
 
+        if let None = next_char {
+            self.previous_mode = self.previous_mode;
+            self.current_mode = MetaSymbolExpanderMode::End;
+        }
+
         match self.current_mode {
-            MetaSymbolExpanderMode::Uninitialized => self.next_mode_from_none(next_char),
+            MetaSymbolExpanderMode::Uninitialized => self.next_mode_from_uninitialized(next_char),
             MetaSymbolExpanderMode::End => {}
             MetaSymbolExpanderMode::Regular => self.next_mode_from_regular(next_char),
             MetaSymbolExpanderMode::ExpandingSpecial(meta_char) => {
@@ -130,11 +135,11 @@ impl<'a> MetaSymbolExpander<'a> {
             MetaSymbolExpanderMode::Separating(sep) => {
                 self.next_mode_from_separating(sep, next_char)
             }
-            MetaSymbolExpanderMode::ChunkReady => self.next_mode_from_chunk_ready(next_char),
+            MetaSymbolExpanderMode::ChunkReady => {}
         }
     }
 
-    fn next_mode_from_none(&mut self, character: Option<char>) {
+    fn next_mode_from_uninitialized(&mut self, character: Option<char>) {
         let fn_for_meta = |s: &mut Self, meta_char: MetaChar| {
             s.previous_mode = s.current_mode;
             s.current_mode = MetaSymbolExpanderMode::ExpandingSpecial(meta_char);
@@ -249,9 +254,32 @@ impl<'a> MetaSymbolExpander<'a> {
         );
     }
 
-    fn next_mode_from_separating(&mut self, sep: Separator, character: Option<char>) {}
+    fn next_mode_from_separating(&mut self, sep: Separator, character: Option<char>) {
+        let fn_for_meta = |s: &mut Self, meta_char: MetaChar| {
+            if sep.allows_meta_char(&meta_char) {
+                s.previous_mode = MetaSymbolExpanderMode::Separating(sep);
+                s.current_mode = MetaSymbolExpanderMode::ExpandingSpecial(meta_char)
+            } else {
+                s.temp_buffer.push(meta_char.name());
+            }
+        };
 
-    fn next_mode_from_chunk_ready(&mut self, character: Option<char>) {}
+        let fn_for_else = |s: &mut Self, x: char| {
+            s.temp_buffer.push(x);
+        };
+
+        let fn_for_separator = |s: &mut Self, _: Separator| {
+            s.previous_mode = s.current_mode;
+            s.current_mode = MetaSymbolExpanderMode::Regular;
+        };
+
+        self.act_on_meta_or_separator_or_else(
+            character,
+            fn_for_meta,
+            fn_for_separator,
+            fn_for_else,
+        );
+    }
 
     fn act_on_meta_or_separator_or_else(
         &mut self,
@@ -280,15 +308,21 @@ impl<'a> Iterator for MetaSymbolExpander<'a> {
     type Item = String;
 
     fn next(&mut self) -> Option<Self::Item> {
-        use MetaSymbolExpanderMode::*;
+        match self.current_mode {
+            MetaSymbolExpanderMode::Separating(Separator::Whitespace(_)) => {
+                self.previous_mode = MetaSymbolExpanderMode::Uninitialized;
+                return Some(" ".to_string());
+            }
+            _ => {}
+        }
 
-        while self.current_mode != End {
-            while self.current_mode != ChunkReady {
+        while self.current_mode != MetaSymbolExpanderMode::End {
+            while self.current_mode != MetaSymbolExpanderMode::ChunkReady {
                 self.next_mode();
             }
 
             self.current_mode = self.previous_mode;
-            self.previous_mode = ChunkReady;
+            self.previous_mode = MetaSymbolExpanderMode::ChunkReady;
 
             return Some(self.temp_buffer.clone());
         }
