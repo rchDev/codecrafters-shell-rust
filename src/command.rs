@@ -1,15 +1,12 @@
 mod meta;
 
 use std::{
-    borrow::Cow,
     env, fmt, fs,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
 };
 
-use meta::MetaChar;
-
-use crate::command::meta::Separator;
+use crate::command::meta::MetaSymbolExpander;
 
 #[derive(Debug)]
 pub enum Command {
@@ -27,14 +24,13 @@ pub enum Command {
 
 impl Command {
     pub fn parse(input: &str) -> Command {
-        let expanded_input = Command::expand_meta_chars(input);
-        let mut args = expanded_input.iter();
-        let (command, _) = (args.next().unwrap().as_ref(), args.next());
+        let mut args = MetaSymbolExpander::new(input.chars());
+        let (command, _) = (args.next().unwrap_or("".to_string()), args.next());
 
-        match command {
+        match &command[..] {
             "exit" => Command::Exit,
             "echo" => {
-                let args: Vec<&str> = args.map(|arg| arg.as_ref()).collect();
+                let args: Vec<String> = args.collect();
                 Command::Echo(args.join(""))
             }
             "type" => {
@@ -46,9 +42,8 @@ impl Command {
             }
             "pwd" => Command::Pwd,
             "cd" => {
-                let args: Vec<&str> = args
+                let args: Vec<String> = args
                     .filter(|arg| !Command::str_contains_only_whitespace(arg.as_ref()))
-                    .map(|arg| arg.as_ref())
                     .collect();
                 Command::Cd(PathBuf::from(args.join("")))
             }
@@ -56,7 +51,6 @@ impl Command {
                 Some(exec_path) => {
                     let args: Vec<String> = args
                         .filter(|arg| !Command::str_contains_only_whitespace(arg.as_ref()))
-                        .map(|arg| arg.to_string())
                         .collect();
                     Command::External {
                         exec_path,
@@ -70,11 +64,6 @@ impl Command {
 
     fn str_contains_only_whitespace(input: &str) -> bool {
         input.trim().is_empty()
-    }
-
-    fn expand_meta_chars(input: &'_ str) -> Vec<Cow<'_, str>> {
-        let mut out: Vec<Cow<str>> = Vec::with_capacity(5);
-        out
     }
 
     fn get_executable_path(input: &str) -> Option<PathBuf> {
@@ -117,19 +106,4 @@ impl fmt::Display for Command {
 }
 
 #[cfg(test)]
-mod test {
-    use super::*;
-    #[test]
-    fn expand_meta_chars_works_base() {
-        let test_input = String::from("asdas$HOME asdasda\n");
-        let result = Command::expand_meta_chars(&test_input);
-        dbg!(result);
-
-        let test_input = String::from("asdas \"asds   ada\"  $HOME asdasda\n");
-        let result = Command::expand_meta_chars(&test_input);
-        dbg!(result);
-        let test_input = String::from("\"world  shell\"  \"example\"\"script\"");
-        let result = Command::expand_meta_chars(&test_input);
-        dbg!(result);
-    }
-}
+mod test {}

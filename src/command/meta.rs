@@ -94,7 +94,7 @@ enum MetaSymbolExpanderMode {
 }
 
 #[derive(Debug)]
-struct MetaSymbolExpander<'a> {
+pub struct MetaSymbolExpander<'a> {
     chars: Chars<'a>,
     start_index: usize,
     end_index: usize,
@@ -105,7 +105,7 @@ struct MetaSymbolExpander<'a> {
 }
 
 impl<'a> MetaSymbolExpander<'a> {
-    fn new(chars: Chars) -> MetaSymbolExpander {
+    pub fn new(chars: Chars) -> MetaSymbolExpander {
         MetaSymbolExpander {
             chars,
             start_index: 0,
