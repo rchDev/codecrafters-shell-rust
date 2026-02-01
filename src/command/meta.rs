@@ -99,6 +99,7 @@ struct MetaSymbolExpander<'a> {
     start_index: usize,
     end_index: usize,
     temp_buffer: String,
+    exansion_buffer: String,
     previous_mode: MetaSymbolExpanderMode,
     current_mode: MetaSymbolExpanderMode,
 }
@@ -110,6 +111,7 @@ impl<'a> MetaSymbolExpander<'a> {
             start_index: 0,
             end_index: 0,
             temp_buffer: String::with_capacity(10),
+            exansion_buffer: String::with_capacity(10),
             previous_mode: MetaSymbolExpanderMode::Uninitialized,
             current_mode: MetaSymbolExpanderMode::Uninitialized,
         }
@@ -188,7 +190,64 @@ impl<'a> MetaSymbolExpander<'a> {
         );
     }
 
-    fn next_mode_from_expanding(&mut self, meta_char: MetaChar, character: Option<char>) {}
+    fn next_mode_from_expanding(&mut self, meta_char: MetaChar, character: Option<char>) {
+        let fn_for_meta = |s: &mut Self, meta_char: MetaChar| {
+            s.exansion_buffer.push(meta_char.name());
+        };
+
+        let fn_for_else = |s: &mut Self, x: char| {
+            s.exansion_buffer.push(x);
+        };
+
+        let fn_for_separator = |s: &mut Self, separator: Separator| {
+            let prev_separator = match s.previous_mode {
+                MetaSymbolExpanderMode::Separating(sep) => Some(sep),
+                _ => None,
+            };
+            match (separator, prev_separator) {
+                (Separator::Whitespace(_), None | Some(Separator::Whitespace(_))) => {
+                    s.temp_buffer
+                        .push_str(&meta_char.expand(&s.exansion_buffer));
+                    s.exansion_buffer.clear();
+                    s.current_mode = MetaSymbolExpanderMode::ChunkReady;
+                    s.previous_mode =
+                        MetaSymbolExpanderMode::Separating(Separator::Whitespace(' '));
+                }
+                (Separator::Whitespace(_), Some(Separator::Double | Separator::Single)) => {
+                    s.temp_buffer
+                        .push_str(&meta_char.expand(&s.exansion_buffer));
+                    s.exansion_buffer.clear();
+                }
+                (Separator::Single, Some(Separator::Single))
+                | (Separator::Double, Some(Separator::Double)) => {
+                    s.current_mode = MetaSymbolExpanderMode::ChunkReady;
+                    s.previous_mode = MetaSymbolExpanderMode::Regular;
+                    s.temp_buffer
+                        .push_str(&meta_char.expand(&s.exansion_buffer));
+                    s.exansion_buffer.clear();
+                }
+                (Separator::Single, None | Some(Separator::Whitespace(_)))
+                | (Separator::Double, None | Some(Separator::Whitespace(_))) => {
+                    s.current_mode = MetaSymbolExpanderMode::ChunkReady;
+                    s.previous_mode = MetaSymbolExpanderMode::Separating(separator);
+                    s.temp_buffer
+                        .push_str(&meta_char.expand(&s.exansion_buffer));
+                    s.exansion_buffer.clear();
+                }
+                (Separator::Single, Some(Separator::Double))
+                | (Separator::Double, Some(Separator::Single)) => {
+                    s.exansion_buffer.push(separator.name());
+                }
+            }
+        };
+
+        self.act_on_meta_or_separator_or_else(
+            character,
+            fn_for_meta,
+            fn_for_separator,
+            fn_for_else,
+        );
+    }
 
     fn next_mode_from_separating(&mut self, sep: Separator, character: Option<char>) {}
 
@@ -222,10 +281,15 @@ impl<'a> Iterator for MetaSymbolExpander<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         use MetaSymbolExpanderMode::*;
+
         while self.current_mode != End {
             while self.current_mode != ChunkReady {
                 self.next_mode();
             }
+
+            self.current_mode = self.previous_mode;
+            self.previous_mode = ChunkReady;
+
             return Some(self.temp_buffer.clone());
         }
         None
