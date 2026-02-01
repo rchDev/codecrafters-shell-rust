@@ -22,7 +22,6 @@ impl MetaChar {
             Self::Dollar => env::var(expansion_buf).unwrap(),
             Self::Star => self.name().to_string(),
             Self::Tilde => {
-                dbg!("IM HERE!!!");
                 let home_dir = env::home_dir().unwrap();
                 home_dir.into_os_string().into_string().unwrap()
             }
@@ -307,7 +306,9 @@ impl<'a> Iterator for MetaSymbolExpander<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         match self.current_mode {
             MetaSymbolExpanderMode::Separating(Separator::Whitespace(_)) => {
-                self.previous_mode = MetaSymbolExpanderMode::Uninitialized;
+                self.previous_mode = self.current_mode;
+                self.current_mode = MetaSymbolExpanderMode::Regular;
+
                 return Some(" ".to_string());
             }
             MetaSymbolExpanderMode::End => {
@@ -316,15 +317,19 @@ impl<'a> Iterator for MetaSymbolExpander<'a> {
             _ => {}
         }
 
-        while self.current_mode != MetaSymbolExpanderMode::End {
+        'outer: while self.current_mode != MetaSymbolExpanderMode::End {
             while self.current_mode != MetaSymbolExpanderMode::ChunkReady {
+                if self.current_mode == MetaSymbolExpanderMode::End {
+                    break 'outer;
+                }
                 self.next_mode();
             }
 
             self.current_mode = self.previous_mode;
             self.previous_mode = MetaSymbolExpanderMode::ChunkReady;
-
-            return Some(self.temp_buffer.clone());
+            let res = Some(self.temp_buffer.clone());
+            self.temp_buffer.clear();
+            return res;
         }
 
         if self.temp_buffer.is_empty() {
