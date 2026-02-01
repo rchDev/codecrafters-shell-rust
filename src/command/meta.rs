@@ -96,8 +96,6 @@ enum MetaSymbolExpanderMode {
 #[derive(Debug)]
 pub struct MetaSymbolExpander<'a> {
     chars: Chars<'a>,
-    start_index: usize,
-    end_index: usize,
     temp_buffer: String,
     exansion_buffer: String,
     previous_mode: MetaSymbolExpanderMode,
@@ -108,8 +106,6 @@ impl<'a> MetaSymbolExpander<'a> {
     pub fn new(chars: Chars) -> MetaSymbolExpander {
         MetaSymbolExpander {
             chars,
-            start_index: 0,
-            end_index: 0,
             temp_buffer: String::with_capacity(10),
             exansion_buffer: String::with_capacity(10),
             previous_mode: MetaSymbolExpanderMode::Uninitialized,
@@ -121,8 +117,9 @@ impl<'a> MetaSymbolExpander<'a> {
         let next_char = self.chars.next();
 
         if let None = next_char {
-            self.previous_mode = self.previous_mode;
+            self.previous_mode = self.current_mode;
             self.current_mode = MetaSymbolExpanderMode::End;
+            return;
         }
 
         match self.current_mode {
@@ -313,6 +310,9 @@ impl<'a> Iterator for MetaSymbolExpander<'a> {
                 self.previous_mode = MetaSymbolExpanderMode::Uninitialized;
                 return Some(" ".to_string());
             }
+            MetaSymbolExpanderMode::End => {
+                return None;
+            }
             _ => {}
         }
 
@@ -326,6 +326,13 @@ impl<'a> Iterator for MetaSymbolExpander<'a> {
 
             return Some(self.temp_buffer.clone());
         }
-        None
+
+        if self.temp_buffer.is_empty() {
+            return None;
+        }
+
+        let res = Some(self.temp_buffer.clone());
+        self.temp_buffer.clear();
+        res
     }
 }
