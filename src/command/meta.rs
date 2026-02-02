@@ -5,6 +5,7 @@ pub enum SpecialChar {
     Dollar,
     Star,
     Tilde,
+    Backslash,
 }
 
 impl SpecialChar {
@@ -14,6 +15,7 @@ impl SpecialChar {
             Self::Dollar => '$',
             Self::Star => '*',
             Self::Tilde => '~',
+            Self::Backslash => '\\',
         }
     }
 
@@ -25,6 +27,7 @@ impl SpecialChar {
                 let home_dir = env::home_dir().unwrap();
                 home_dir.into_os_string().into_string().unwrap()
             }
+            Self::Backslash => expansion_buf.to_owned(),
         }
     }
 }
@@ -36,6 +39,7 @@ impl TryFrom<char> for SpecialChar {
             '$' => Ok(Self::Dollar),
             '*' => Ok(Self::Star),
             '~' => Ok(Self::Tilde),
+            '\\' => Ok(Self::Backslash),
             _ => Err(()),
         }
     }
@@ -54,6 +58,7 @@ impl Separator {
             Self::Single => false,
             Self::Double => match meta_char {
                 SpecialChar::Dollar => true,
+                SpecialChar::Backslash => true,
                 _ => false,
             },
             Self::Whitespace(_) => true,
@@ -94,7 +99,7 @@ pub struct MetaSymbolExpander<'a> {
     chars: Chars<'a>,
     out_queue: VecDeque<String>,
     temp_buffer: String,
-    exansion_buffer: String,
+    expansion_buffer: String,
     mode: MetaSymbolExpanderMode,
     active_separator: Option<Separator>,
     active_special: Option<SpecialChar>,
@@ -107,7 +112,7 @@ impl<'a> MetaSymbolExpander<'a> {
             chars,
             out_queue: VecDeque::with_capacity(2),
             temp_buffer: String::with_capacity(10),
-            exansion_buffer: String::with_capacity(10),
+            expansion_buffer: String::with_capacity(10),
             mode: MetaSymbolExpanderMode::Chunking,
             active_separator: None,
             active_special: None,
@@ -123,8 +128,13 @@ impl<'a> MetaSymbolExpander<'a> {
         }
 
         let fn_for_normal = |s: &mut Self, normal_char: char| {
-            if s.active_special.is_some() {
-                s.exansion_buffer.push(normal_char);
+            if let Some(special) = s.active_special {
+                s.expansion_buffer.push(normal_char);
+                if special == SpecialChar::Backslash {
+                    s.temp_buffer.push_str(&special.expand(&s.expansion_buffer));
+                    s.expansion_buffer.clear();
+                    s.active_special = None;
+                }
             } else {
                 s.temp_buffer.push(normal_char);
             }
@@ -136,8 +146,15 @@ impl<'a> MetaSymbolExpander<'a> {
                 .is_some_and(|s| s.allows_meta_char(&special_char))
                 || s.active_separator.is_none()
             {
-                if s.active_special.is_some() {
-                    s.exansion_buffer.push(special_char.name())
+                if let Some(active_spec_char) = s.active_special {
+                    s.expansion_buffer.push(special_char.name());
+                    if let SpecialChar::Backslash = active_spec_char {
+                        s.temp_buffer
+                            .push_str(&special_char.expand(&s.expansion_buffer));
+                        s.expansion_buffer.clear();
+                        s.mode = MetaSymbolExpanderMode::ChunkReady;
+                        s.active_special = None;
+                    }
                 } else if let SpecialChar::Tilde = special_char {
                     s.temp_buffer.push_str(&special_char.expand(""));
                 } else {
@@ -153,10 +170,14 @@ impl<'a> MetaSymbolExpander<'a> {
             let Some(active_sep_char) = s.active_separator else {
                 // No active_separator case
                 if let Some(special_char) = s.active_special {
-                    s.temp_buffer
-                        .push_str(&special_char.expand(&s.exansion_buffer));
-                    s.exansion_buffer.clear();
-                    s.active_special = None;
+                    if special_char == SpecialChar::Backslash {
+                        return fn_for_normal(s, separator_char.name());
+                    } else {
+                        s.temp_buffer
+                            .push_str(&special_char.expand(&s.expansion_buffer));
+                        s.expansion_buffer.clear();
+                        s.active_special = None;
+                    }
                 }
 
                 if !s.temp_buffer.is_empty() {
@@ -188,8 +209,8 @@ impl<'a> MetaSymbolExpander<'a> {
                 s.active_separator = None;
                 if let Some(special_char) = s.active_special {
                     s.temp_buffer
-                        .push_str(&special_char.expand(&s.exansion_buffer));
-                    s.exansion_buffer.clear();
+                        .push_str(&special_char.expand(&s.expansion_buffer));
+                    s.expansion_buffer.clear();
                     s.active_special = None;
                 }
                 if !s.temp_buffer.is_empty() {
@@ -199,7 +220,7 @@ impl<'a> MetaSymbolExpander<'a> {
                 }
             } else {
                 if s.active_special.is_some() {
-                    s.exansion_buffer.push(separator_char.name());
+                    s.expansion_buffer.push(separator_char.name());
                 } else {
                     s.temp_buffer.push(separator_char.name());
                 }
