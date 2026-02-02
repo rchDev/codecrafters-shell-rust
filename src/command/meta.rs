@@ -46,14 +46,14 @@ impl TryFrom<char> for SpecialChar {
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]
-pub enum Separator {
+pub enum ZoningChar {
     Single,
     Double,
     Whitespace(char),
 }
 
-impl Separator {
-    pub fn allows_meta_char(&self, meta_char: &SpecialChar) -> bool {
+impl ZoningChar {
+    pub fn allows_special_char(&self, meta_char: &SpecialChar) -> bool {
         match self {
             Self::Single => false,
             Self::Double => match meta_char {
@@ -75,7 +75,7 @@ impl Separator {
     }
 }
 
-impl TryFrom<char> for Separator {
+impl TryFrom<char> for ZoningChar {
     type Error = ();
     fn try_from(value: char) -> Result<Self, Self::Error> {
         match value {
@@ -101,7 +101,7 @@ pub struct MetaSymbolExpander<'a> {
     temp_buffer: String,
     expansion_buffer: String,
     mode: MetaSymbolExpanderMode,
-    active_separator: Option<Separator>,
+    active_zoning: Option<ZoningChar>,
     active_special: Option<SpecialChar>,
     prev_was_whitespace: bool,
 }
@@ -114,7 +114,7 @@ impl<'a> MetaSymbolExpander<'a> {
             temp_buffer: String::with_capacity(10),
             expansion_buffer: String::with_capacity(10),
             mode: MetaSymbolExpanderMode::Chunking,
-            active_separator: None,
+            active_zoning: None,
             active_special: None,
             prev_was_whitespace: false,
         }
@@ -142,9 +142,9 @@ impl<'a> MetaSymbolExpander<'a> {
         };
 
         let fn_for_special = |s: &mut Self, special_char: SpecialChar| {
-            if s.active_separator
-                .is_some_and(|s| s.allows_meta_char(&special_char))
-                || s.active_separator.is_none()
+            if s.active_zoning
+                .is_some_and(|s| s.allows_special_char(&special_char))
+                || s.active_zoning.is_none()
             {
                 if let Some(active_spec_char) = s.active_special {
                     s.expansion_buffer.push(special_char.name());
@@ -166,12 +166,12 @@ impl<'a> MetaSymbolExpander<'a> {
             s.prev_was_whitespace = false;
         };
 
-        let fn_for_separator = |s: &mut Self, separator_char: Separator| {
-            let Some(active_sep_char) = s.active_separator else {
+        let fn_for_separator = |s: &mut Self, zoning_char: ZoningChar| {
+            let Some(active_sep_char) = s.active_zoning else {
                 // No active_separator case
                 if let Some(special_char) = s.active_special {
                     if special_char == SpecialChar::Backslash {
-                        return fn_for_normal(s, separator_char.name());
+                        return fn_for_normal(s, zoning_char.name());
                     } else {
                         s.temp_buffer
                             .push_str(&special_char.expand(&s.expansion_buffer));
@@ -185,8 +185,8 @@ impl<'a> MetaSymbolExpander<'a> {
                     s.temp_buffer.clear();
                 }
 
-                match separator_char {
-                    Separator::Whitespace(_) => {
+                match zoning_char {
+                    ZoningChar::Whitespace(_) => {
                         if !s.prev_was_whitespace {
                             s.out_queue.push_back(" ".to_string());
                         }
@@ -194,7 +194,7 @@ impl<'a> MetaSymbolExpander<'a> {
                     }
                     _ => {
                         s.prev_was_whitespace = false;
-                        s.active_separator = Some(separator_char);
+                        s.active_zoning = Some(zoning_char);
                     }
                 }
 
@@ -205,8 +205,8 @@ impl<'a> MetaSymbolExpander<'a> {
                 return;
             };
 
-            if active_sep_char == separator_char {
-                s.active_separator = None;
+            if active_sep_char == zoning_char {
+                s.active_zoning = None;
                 if let Some(special_char) = s.active_special {
                     s.temp_buffer
                         .push_str(&special_char.expand(&s.expansion_buffer));
@@ -220,9 +220,9 @@ impl<'a> MetaSymbolExpander<'a> {
                 }
             } else {
                 if s.active_special.is_some() {
-                    s.expansion_buffer.push(separator_char.name());
+                    s.expansion_buffer.push(zoning_char.name());
                 } else {
-                    s.temp_buffer.push(separator_char.name());
+                    s.temp_buffer.push(zoning_char.name());
                 }
             }
         };
@@ -241,13 +241,13 @@ impl<'a> MetaSymbolExpander<'a> {
         &mut self,
         character: Option<char>,
         mut fn_for_meta: impl FnMut(&mut Self, SpecialChar),
-        mut fn_for_separator: impl FnMut(&mut Self, Separator),
+        mut fn_for_separator: impl FnMut(&mut Self, ZoningChar),
         mut fn_for_else: impl FnMut(&mut Self, char),
     ) {
         if let Some(c) = character {
             if let Ok(meta_char) = SpecialChar::try_from(c) {
                 fn_for_meta(self, meta_char);
-            } else if let Ok(separator) = Separator::try_from(c) {
+            } else if let Ok(separator) = ZoningChar::try_from(c) {
                 fn_for_separator(self, separator);
             } else {
                 fn_for_else(self, c);
