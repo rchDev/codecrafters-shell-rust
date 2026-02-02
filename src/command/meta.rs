@@ -1,19 +1,19 @@
 use std::{collections::VecDeque, env, str::Chars};
 
 #[derive(PartialEq, Debug, Copy, Clone)]
-pub enum MetaChar {
+pub enum SpecialChar {
     Dollar,
     Star,
     Tilde,
 }
 
-impl MetaChar {
+impl SpecialChar {
     #[allow(dead_code)]
     pub fn name(&self) -> char {
         match self {
-            MetaChar::Dollar => '$',
-            MetaChar::Star => '*',
-            MetaChar::Tilde => '~',
+            Self::Dollar => '$',
+            Self::Star => '*',
+            Self::Tilde => '~',
         }
     }
 
@@ -29,13 +29,13 @@ impl MetaChar {
     }
 }
 
-impl TryFrom<char> for MetaChar {
+impl TryFrom<char> for SpecialChar {
     type Error = ();
     fn try_from(value: char) -> Result<Self, Self::Error> {
         match value {
-            '$' => Ok(MetaChar::Dollar),
-            '*' => Ok(MetaChar::Star),
-            '~' => Ok(MetaChar::Tilde),
+            '$' => Ok(Self::Dollar),
+            '*' => Ok(Self::Star),
+            '~' => Ok(Self::Tilde),
             _ => Err(()),
         }
     }
@@ -49,11 +49,11 @@ pub enum Separator {
 }
 
 impl Separator {
-    pub fn allows_meta_char(&self, meta_char: &MetaChar) -> bool {
+    pub fn allows_meta_char(&self, meta_char: &SpecialChar) -> bool {
         match self {
             Self::Single => false,
             Self::Double => match meta_char {
-                MetaChar::Dollar => true,
+                SpecialChar::Dollar => true,
                 _ => false,
             },
             Self::Whitespace(_) => true,
@@ -97,7 +97,7 @@ pub struct MetaSymbolExpander<'a> {
     exansion_buffer: String,
     mode: MetaSymbolExpanderMode,
     active_separator: Option<Separator>,
-    active_special: Option<MetaChar>,
+    active_special: Option<SpecialChar>,
     prev_was_whitespace: bool,
 }
 
@@ -131,14 +131,14 @@ impl<'a> MetaSymbolExpander<'a> {
             s.prev_was_whitespace = false;
         };
 
-        let fn_for_special = |s: &mut Self, special_char: MetaChar| {
+        let fn_for_special = |s: &mut Self, special_char: SpecialChar| {
             if s.active_separator
                 .is_some_and(|s| s.allows_meta_char(&special_char))
                 || s.active_separator.is_none()
             {
                 if s.active_special.is_some() {
                     s.exansion_buffer.push(special_char.name())
-                } else if let MetaChar::Tilde = special_char {
+                } else if let SpecialChar::Tilde = special_char {
                     s.temp_buffer.push_str(&special_char.expand(""));
                 } else {
                     s.active_special = Some(special_char);
@@ -219,12 +219,12 @@ impl<'a> MetaSymbolExpander<'a> {
     fn act_on_special_or_separator_or_else(
         &mut self,
         character: Option<char>,
-        mut fn_for_meta: impl FnMut(&mut Self, MetaChar),
+        mut fn_for_meta: impl FnMut(&mut Self, SpecialChar),
         mut fn_for_separator: impl FnMut(&mut Self, Separator),
         mut fn_for_else: impl FnMut(&mut Self, char),
     ) {
         if let Some(c) = character {
-            if let Ok(meta_char) = MetaChar::try_from(c) {
+            if let Ok(meta_char) = SpecialChar::try_from(c) {
                 fn_for_meta(self, meta_char);
             } else if let Ok(separator) = Separator::try_from(c) {
                 fn_for_separator(self, separator);
