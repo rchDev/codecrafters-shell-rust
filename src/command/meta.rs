@@ -360,4 +360,28 @@ mod test {
 
         assert_eq!(expected, actual, "\ninput: {:#?}", input);
     }
+
+    #[test]
+    fn expander_case6() {
+        let input =
+            r#"cat /tmp/rat/'no slash 44' /tmp/rat/'one slash \95' /tmp/rat/'two slashes \50\'"#;
+
+        let input_iter = MetaSymbolExpander::new(input.chars());
+
+        let actual: Vec<String> = input_iter.collect();
+        let expected = vec![
+            "cat".to_string(),
+            " ".to_string(),
+            "/tmp/rat/".to_string(),
+            "no slash 44".to_string(),
+            " ".to_string(),
+            "/tmp/rat/".to_string(),
+            r#"one slash \95"#.to_string(),
+            " ".to_string(),
+            "/tmp/rat/".to_string(),
+            r#"two slashes \50\"#.to_string(),
+        ];
+        dbg!(&actual);
+        assert_eq!(expected, actual, "\ninput: {:#?}", input);
+    }
 }
