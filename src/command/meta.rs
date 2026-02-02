@@ -98,6 +98,7 @@ pub struct MetaSymbolExpander<'a> {
     mode: MetaSymbolExpanderMode,
     active_separator: Option<Separator>,
     active_special: Option<MetaChar>,
+    prev_was_whitespace: bool,
 }
 
 impl<'a> MetaSymbolExpander<'a> {
@@ -110,6 +111,7 @@ impl<'a> MetaSymbolExpander<'a> {
             mode: MetaSymbolExpanderMode::Chunking,
             active_separator: None,
             active_special: None,
+            prev_was_whitespace: false,
         }
     }
 
@@ -126,6 +128,7 @@ impl<'a> MetaSymbolExpander<'a> {
             } else {
                 s.temp_buffer.push(normal_char);
             }
+            s.prev_was_whitespace = false;
         };
 
         let fn_for_special = |s: &mut Self, special_char: MetaChar| {
@@ -135,12 +138,15 @@ impl<'a> MetaSymbolExpander<'a> {
             {
                 if s.active_special.is_some() {
                     s.exansion_buffer.push(special_char.name())
+                } else if let MetaChar::Tilde = special_char {
+                    s.temp_buffer.push_str(&special_char.expand(""));
                 } else {
                     s.active_special = Some(special_char);
                 }
             } else {
                 s.temp_buffer.push(special_char.name());
             }
+            s.prev_was_whitespace = false;
         };
 
         let fn_for_separator = |s: &mut Self, separator_char: Separator| {
@@ -159,8 +165,14 @@ impl<'a> MetaSymbolExpander<'a> {
                 }
 
                 match separator_char {
-                    Separator::Whitespace(_) => s.out_queue.push_back(" ".to_string()),
+                    Separator::Whitespace(_) => {
+                        if !s.prev_was_whitespace {
+                            s.out_queue.push_back(" ".to_string());
+                        }
+                        s.prev_was_whitespace = true;
+                    }
                     _ => {
+                        s.prev_was_whitespace = false;
                         s.active_separator = Some(separator_char);
                     }
                 }

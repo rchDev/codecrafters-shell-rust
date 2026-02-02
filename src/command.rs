@@ -24,7 +24,8 @@ pub enum Command {
 
 impl Command {
     pub fn parse(input: &str) -> Command {
-        let mut args = MetaSymbolExpander::new(input.chars());
+        let trimmed_input = input.trim();
+        let mut args = MetaSymbolExpander::new(trimmed_input.chars());
         let (command, _) = (args.next().unwrap_or("".to_string()), args.next());
 
         match &command[..] {
@@ -57,7 +58,7 @@ impl Command {
                         args: args,
                     }
                 }
-                None => Command::None(input.to_string()),
+                None => Command::None(trimmed_input.to_string()),
             },
         }
     }
