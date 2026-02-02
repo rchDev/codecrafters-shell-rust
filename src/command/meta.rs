@@ -47,15 +47,15 @@ impl TryFrom<char> for SpecialChar {
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum ZoningChar {
-    Single,
-    Double,
+    SingleQuote,
+    DoubleQuote,
 }
 
 impl ZoningChar {
     pub fn allows_special_char(&self, meta_char: &SpecialChar) -> bool {
         match self {
-            Self::Single => false,
-            Self::Double => match meta_char {
+            Self::SingleQuote => false,
+            Self::DoubleQuote => match meta_char {
                 SpecialChar::Dollar => true,
                 SpecialChar::Backslash => true,
                 _ => false,
@@ -66,8 +66,8 @@ impl ZoningChar {
     #[allow(dead_code)]
     pub fn name(&self) -> char {
         match self {
-            Self::Single => '\'',
-            Self::Double => '"',
+            Self::SingleQuote => '\'',
+            Self::DoubleQuote => '"',
         }
     }
 }
@@ -76,8 +76,8 @@ impl TryFrom<char> for ZoningChar {
     type Error = ();
     fn try_from(value: char) -> Result<Self, Self::Error> {
         match value {
-            '\'' => Ok(Self::Single),
-            '"' => Ok(Self::Double),
+            '\'' => Ok(Self::SingleQuote),
+            '"' => Ok(Self::DoubleQuote),
             _ => Err(()),
         }
     }
@@ -192,8 +192,9 @@ impl<'a> MetaSymbolExpander<'a> {
                             .push_str(&special_char.expand(&s.expansion_buffer));
                         s.expansion_buffer.clear();
                         s.active_special = None;
+                    } else {
+                        s.active_zoning = None;
                     }
-                    s.active_zoning = None;
                 } else {
                     s.temp_buffer.push(zoning_char.name());
                 }
@@ -380,6 +381,18 @@ mod test {
 
         let actual: Vec<String> = input_iter.collect();
         let expected = vec!["'\"test".to_string(), "hello\"'".to_string()];
+        assert_eq!(expected, actual, "\ninput: {:#?}", input);
+    }
+
+    #[test]
+    fn expander_case8() {
+        let input = r#""mixed\"quote'example'\\"#;
+
+        let input_iter = MetaSymbolExpander::new(input.chars());
+
+        let actual: String = input_iter.collect::<Vec<String>>().join("");
+        let expected = "mixed\"quote'example'\\".to_string();
+
         assert_eq!(expected, actual, "\ninput: {:#?}", input);
     }
 }
