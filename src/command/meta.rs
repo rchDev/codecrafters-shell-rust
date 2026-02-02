@@ -49,7 +49,6 @@ impl TryFrom<char> for SpecialChar {
 pub enum ZoningChar {
     Single,
     Double,
-    Whitespace(char),
 }
 
 impl ZoningChar {
@@ -61,7 +60,6 @@ impl ZoningChar {
                 SpecialChar::Backslash => true,
                 _ => false,
             },
-            Self::Whitespace(_) => true,
         }
     }
 
@@ -70,7 +68,6 @@ impl ZoningChar {
         match self {
             Self::Single => '\'',
             Self::Double => '"',
-            Self::Whitespace(val) => *val,
         }
     }
 }
@@ -81,6 +78,29 @@ impl TryFrom<char> for ZoningChar {
         match value {
             '\'' => Ok(Self::Single),
             '"' => Ok(Self::Double),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(PartialEq, Debug, Clone, Copy)]
+pub enum Separator {
+    Whitespace(char),
+}
+
+impl Separator {
+    #[allow(dead_code)]
+    pub fn name(&self) -> char {
+        match self {
+            Self::Whitespace(val) => *val,
+        }
+    }
+}
+
+impl TryFrom<char> for Separator {
+    type Error = ();
+    fn try_from(value: char) -> Result<Self, Self::Error> {
+        match value {
             _ if value.is_whitespace() => Ok(Self::Whitespace(value)),
             _ => Err(()),
         }
@@ -97,26 +117,22 @@ enum MetaSymbolExpanderMode {
 #[derive(Debug)]
 pub struct MetaSymbolExpander<'a> {
     chars: Chars<'a>,
-    out_queue: VecDeque<String>,
     temp_buffer: String,
     expansion_buffer: String,
     mode: MetaSymbolExpanderMode,
     active_zoning: Option<ZoningChar>,
     active_special: Option<SpecialChar>,
-    prev_was_whitespace: bool,
 }
 
 impl<'a> MetaSymbolExpander<'a> {
     pub fn new(chars: Chars) -> MetaSymbolExpander {
         MetaSymbolExpander {
             chars,
-            out_queue: VecDeque::with_capacity(2),
             temp_buffer: String::with_capacity(10),
             expansion_buffer: String::with_capacity(10),
             mode: MetaSymbolExpanderMode::Chunking,
             active_zoning: None,
             active_special: None,
-            prev_was_whitespace: false,
         }
     }
 
@@ -138,7 +154,6 @@ impl<'a> MetaSymbolExpander<'a> {
             } else {
                 s.temp_buffer.push(normal_char);
             }
-            s.prev_was_whitespace = false;
         };
 
         let fn_for_special = |s: &mut Self, special_char: SpecialChar| {
@@ -152,7 +167,6 @@ impl<'a> MetaSymbolExpander<'a> {
                         s.temp_buffer
                             .push_str(&special_char.expand(&s.expansion_buffer));
                         s.expansion_buffer.clear();
-                        s.mode = MetaSymbolExpanderMode::ChunkReady;
                         s.active_special = None;
                     }
                 } else if let SpecialChar::Tilde = special_char {
@@ -163,91 +177,87 @@ impl<'a> MetaSymbolExpander<'a> {
             } else {
                 s.temp_buffer.push(special_char.name());
             }
-            s.prev_was_whitespace = false;
         };
 
-        let fn_for_separator = |s: &mut Self, zoning_char: ZoningChar| {
-            let Some(active_sep_char) = s.active_zoning else {
-                // No active_separator case
-                if let Some(special_char) = s.active_special {
-                    if special_char == SpecialChar::Backslash {
-                        return fn_for_normal(s, zoning_char.name());
-                    } else {
+        let fn_for_zoning = |s: &mut Self, zoning_char: ZoningChar| {
+            if let Some(current_zoning_char) = s.active_zoning {
+                if current_zoning_char == zoning_char {
+                    if let Some(special_char) = s.active_special {
+                        if special_char == SpecialChar::Backslash {
+                            s.expansion_buffer.push(zoning_char.name());
+                        }
                         s.temp_buffer
                             .push_str(&special_char.expand(&s.expansion_buffer));
                         s.expansion_buffer.clear();
                         s.active_special = None;
                     }
+                    s.active_zoning = None;
+                } else {
+                    s.temp_buffer.push(zoning_char.name());
                 }
-
-                if !s.temp_buffer.is_empty() {
-                    s.out_queue.push_back(s.temp_buffer.clone());
-                    s.temp_buffer.clear();
-                }
-
-                match zoning_char {
-                    ZoningChar::Whitespace(_) => {
-                        if !s.prev_was_whitespace {
-                            s.out_queue.push_back(" ".to_string());
-                        }
-                        s.prev_was_whitespace = true;
-                    }
-                    _ => {
-                        s.prev_was_whitespace = false;
+            } else {
+                if let Some(special_char) = s.active_special {
+                    if special_char == SpecialChar::Backslash {
+                        s.expansion_buffer.push(zoning_char.name());
+                    } else {
                         s.active_zoning = Some(zoning_char);
                     }
-                }
-
-                if !s.out_queue.is_empty() {
-                    s.mode = MetaSymbolExpanderMode::ChunkReady;
-                }
-
-                return;
-            };
-
-            if active_sep_char == zoning_char {
-                s.active_zoning = None;
-                if let Some(special_char) = s.active_special {
+                    dbg!(special_char, zoning_char, &s.expansion_buffer);
                     s.temp_buffer
                         .push_str(&special_char.expand(&s.expansion_buffer));
                     s.expansion_buffer.clear();
-                    s.active_special = None;
-                }
-                if !s.temp_buffer.is_empty() {
-                    s.out_queue.push_back(s.temp_buffer.clone());
-                    s.temp_buffer.clear();
-                    s.mode = MetaSymbolExpanderMode::ChunkReady;
-                }
-            } else {
-                if s.active_special.is_some() {
-                    s.expansion_buffer.push(zoning_char.name());
+                    s.active_zoning = None;
                 } else {
-                    s.temp_buffer.push(zoning_char.name());
+                    s.active_zoning = Some(zoning_char);
                 }
             }
         };
 
-        if let MetaSymbolExpanderMode::Chunking = self.mode {
-            self.act_on_special_or_separator_or_else(
-                next_char,
-                fn_for_special,
-                fn_for_separator,
-                fn_for_normal,
-            );
-        }
+        let fn_for_separator = |s: &mut Self, separator: Separator| {
+            if let Some(special_char) = s.active_special {
+                let special_char_is_backslash = special_char == SpecialChar::Backslash;
+                if special_char_is_backslash {
+                    s.expansion_buffer.push(separator.name());
+                }
+
+                s.temp_buffer
+                    .push_str(&special_char.expand(&s.expansion_buffer));
+                s.expansion_buffer.clear();
+                s.active_special = None;
+
+                if special_char_is_backslash {
+                    return;
+                }
+            }
+            if s.active_zoning.is_some() {
+                s.temp_buffer.push(separator.name());
+            } else if !s.temp_buffer.is_empty() {
+                s.mode = MetaSymbolExpanderMode::ChunkReady;
+            }
+        };
+        self.apply_special_or_meta_or_separator_or_else(
+            next_char,
+            fn_for_special,
+            fn_for_zoning,
+            fn_for_separator,
+            fn_for_normal,
+        );
     }
 
-    fn act_on_special_or_separator_or_else(
+    fn apply_special_or_meta_or_separator_or_else(
         &mut self,
         character: Option<char>,
         mut fn_for_meta: impl FnMut(&mut Self, SpecialChar),
-        mut fn_for_separator: impl FnMut(&mut Self, ZoningChar),
+        mut fn_for_zoning: impl FnMut(&mut Self, ZoningChar),
+        mut fn_for_separator: impl FnMut(&mut Self, Separator),
         mut fn_for_else: impl FnMut(&mut Self, char),
     ) {
         if let Some(c) = character {
             if let Ok(meta_char) = SpecialChar::try_from(c) {
                 fn_for_meta(self, meta_char);
-            } else if let Ok(separator) = ZoningChar::try_from(c) {
+            } else if let Ok(zoning_char) = ZoningChar::try_from(c) {
+                fn_for_zoning(self, zoning_char);
+            } else if let Ok(separator) = Separator::try_from(c) {
                 fn_for_separator(self, separator);
             } else {
                 fn_for_else(self, c);
@@ -270,15 +280,18 @@ impl<'a> Iterator for MetaSymbolExpander<'a> {
 
             self.mode = MetaSymbolExpanderMode::Chunking;
 
-            return self.out_queue.pop_front();
+            let res = self.temp_buffer.clone();
+            self.temp_buffer.clear();
+            return Some(res);
         }
 
         if !&self.temp_buffer.is_empty() {
-            self.out_queue.push_back(self.temp_buffer.clone());
+            let res = self.temp_buffer.clone();
             self.temp_buffer.clear();
+            return Some(res);
         }
 
-        return self.out_queue.pop_front();
+        None
     }
 }
 
@@ -291,7 +304,7 @@ mod test {
         let input_iter = MetaSymbolExpander::new(input.chars());
 
         let actual: Vec<String> = input_iter.collect();
-        let expected = vec!["hello".to_string(), " ".to_string(), "world".to_string()];
+        let expected = vec!["hello".to_string(), "world".to_string()];
 
         assert_eq!(expected, actual, "\ninput: ${:#?}", input);
     }
@@ -302,13 +315,7 @@ mod test {
         let input_iter = MetaSymbolExpander::new(input.chars());
 
         let actual: Vec<String> = input_iter.collect();
-        let expected = vec![
-            "hello".to_string(),
-            " ".to_string(),
-            "world".to_string(),
-            " ".to_string(),
-            "memo".to_string(),
-        ];
+        let expected = vec!["hello".to_string(), "world".to_string(), "memo".to_string()];
 
         assert_eq!(expected, actual, "\ninput: ${:#?}", input);
     }
@@ -318,13 +325,7 @@ mod test {
         let input_iter = MetaSymbolExpander::new(input.chars());
 
         let actual: Vec<String> = input_iter.collect();
-        let expected = vec![
-            "hello".to_string(),
-            " ".to_string(),
-            "world".to_string(),
-            " ".to_string(),
-            "memo".to_string(),
-        ];
+        let expected = vec!["hello".to_string(), "world".to_string(), "memo".to_string()];
 
         assert_eq!(expected, actual, "\ninput: ${:#?}", input);
     }
@@ -335,11 +336,7 @@ mod test {
         let input_iter = MetaSymbolExpander::new(input.chars());
 
         let actual: Vec<String> = input_iter.collect();
-        let expected = vec![
-            "hello".to_string(),
-            " ".to_string(),
-            "worl'd  memo".to_string(),
-        ];
+        let expected = vec!["hello".to_string(), "worl'd  memo".to_string()];
 
         assert_eq!(expected, actual, "\ninput: {:#?}", input);
     }
@@ -350,13 +347,7 @@ mod test {
         let input_iter = MetaSymbolExpander::new(input.chars());
 
         let actual: Vec<String> = input_iter.collect();
-        let expected = vec![
-            "echo".to_string(),
-            " ".to_string(),
-            "hello".to_string(),
-            " ".to_string(),
-            "world".to_string(),
-        ];
+        let expected = vec!["echo".to_string(), "hello".to_string(), "world".to_string()];
 
         assert_eq!(expected, actual, "\ninput: {:#?}", input);
     }
@@ -371,17 +362,21 @@ mod test {
         let actual: Vec<String> = input_iter.collect();
         let expected = vec![
             "cat".to_string(),
-            " ".to_string(),
-            "/tmp/rat/".to_string(),
-            "no slash 44".to_string(),
-            " ".to_string(),
-            "/tmp/rat/".to_string(),
-            r#"one slash \95"#.to_string(),
-            " ".to_string(),
-            "/tmp/rat/".to_string(),
-            r#"two slashes \50\"#.to_string(),
+            "/tmp/rat/no slash 44".to_string(),
+            r#"/tmp/rat/one slash \95"#.to_string(),
+            r#"/tmp/rat/two slashes \50\"#.to_string(),
         ];
-        dbg!(&actual);
+        assert_eq!(expected, actual, "\ninput: {:#?}", input);
+    }
+
+    #[test]
+    fn expander_case7() {
+        let input = "\'\"test hello\"\'";
+
+        let input_iter = MetaSymbolExpander::new(input.chars());
+
+        let actual: Vec<String> = input_iter.collect();
+        let expected = vec!["'\"test hello\"'".to_string()];
         assert_eq!(expected, actual, "\ninput: {:#?}", input);
     }
 }

@@ -26,13 +26,13 @@ impl Command {
     pub fn parse(input: &str) -> Command {
         let trimmed_input = input.trim();
         let mut args = MetaSymbolExpander::new(trimmed_input.chars());
-        let (command, _) = (args.next().unwrap_or("".to_string()), args.next());
+        let command = args.next().unwrap_or("".to_string());
 
         match &command[..] {
             "exit" => Command::Exit,
             "echo" => {
                 let args: Vec<String> = args.collect();
-                Command::Echo(args.join(""))
+                Command::Echo(args.join(" "))
             }
             "type" => {
                 let inner_commands: Vec<Command> = args
@@ -43,16 +43,12 @@ impl Command {
             }
             "pwd" => Command::Pwd,
             "cd" => {
-                let args: Vec<String> = args
-                    .filter(|arg| !Command::str_contains_only_whitespace(arg.as_ref()))
-                    .collect();
+                let args: Vec<String> = args.collect();
                 Command::Cd(PathBuf::from(args.join("")))
             }
             other => match Command::get_executable_path(other) {
                 Some(exec_path) => {
-                    let args: Vec<String> = args
-                        .filter(|arg| !Command::str_contains_only_whitespace(arg.as_ref()))
-                        .collect();
+                    let args: Vec<String> = args.collect();
                     Command::External {
                         exec_path,
                         args: args,
