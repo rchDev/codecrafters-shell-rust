@@ -1,4 +1,4 @@
-use std::{env, str::Chars};
+use std::{collections::VecDeque, env, str::Chars};
 
 #[derive(PartialEq, Debug, Copy, Clone)]
 pub enum MetaChar {
@@ -92,6 +92,7 @@ enum MetaSymbolExpanderMode {
 #[derive(Debug)]
 pub struct MetaSymbolExpander<'a> {
     chars: Chars<'a>,
+    out_queue: VecDeque<String>,
     temp_buffer: String,
     exansion_buffer: String,
     mode: MetaSymbolExpanderMode,
@@ -103,6 +104,7 @@ impl<'a> MetaSymbolExpander<'a> {
     pub fn new(chars: Chars) -> MetaSymbolExpander {
         MetaSymbolExpander {
             chars,
+            out_queue: VecDeque::with_capacity(2),
             temp_buffer: String::with_capacity(10),
             exansion_buffer: String::with_capacity(10),
             mode: MetaSymbolExpanderMode::Chunking,
@@ -113,7 +115,6 @@ impl<'a> MetaSymbolExpander<'a> {
 
     fn process_next_char(&mut self) {
         let next_char = self.chars.next();
-
         if let None = next_char {
             self.mode = MetaSymbolExpanderMode::EndReached;
             return;
@@ -144,19 +145,27 @@ impl<'a> MetaSymbolExpander<'a> {
 
         let fn_for_separator = |s: &mut Self, separator_char: Separator| {
             let Some(active_sep_char) = s.active_separator else {
+                // No active_separator case
                 if let Some(special_char) = s.active_special {
                     s.temp_buffer
                         .push_str(&special_char.expand(&s.exansion_buffer));
                     s.exansion_buffer.clear();
                     s.active_special = None;
                 }
+
+                if !s.temp_buffer.is_empty() {
+                    s.out_queue.push_back(s.temp_buffer.clone());
+                    s.temp_buffer.clear();
+                }
+
                 match separator_char {
-                    Separator::Whitespace(_) => {}
+                    Separator::Whitespace(_) => s.out_queue.push_back(" ".to_string()),
                     _ => {
                         s.active_separator = Some(separator_char);
                     }
                 }
-                if !s.temp_buffer.is_empty() {
+
+                if !s.out_queue.is_empty() {
                     s.mode = MetaSymbolExpanderMode::ChunkReady;
                 }
 
@@ -164,7 +173,6 @@ impl<'a> MetaSymbolExpander<'a> {
             };
 
             if active_sep_char == separator_char {
-                dbg!(active_sep_char, separator_char);
                 s.active_separator = None;
                 if let Some(special_char) = s.active_special {
                     s.temp_buffer
@@ -172,9 +180,12 @@ impl<'a> MetaSymbolExpander<'a> {
                     s.exansion_buffer.clear();
                     s.active_special = None;
                 }
-                s.mode = MetaSymbolExpanderMode::ChunkReady;
+                if !s.temp_buffer.is_empty() {
+                    s.out_queue.push_back(s.temp_buffer.clone());
+                    s.temp_buffer.clear();
+                    s.mode = MetaSymbolExpanderMode::ChunkReady;
+                }
             } else {
-                dbg!(active_sep_char, separator_char);
                 if s.active_special.is_some() {
                     s.exansion_buffer.push(separator_char.name());
                 } else {
@@ -225,19 +236,16 @@ impl<'a> Iterator for MetaSymbolExpander<'a> {
             }
 
             self.mode = MetaSymbolExpanderMode::Chunking;
-            let res = Some(self.temp_buffer.clone());
+
+            return self.out_queue.pop_front();
+        }
+
+        if !&self.temp_buffer.is_empty() {
+            self.out_queue.push_back(self.temp_buffer.clone());
             self.temp_buffer.clear();
-
-            return res;
         }
 
-        if self.temp_buffer.is_empty() {
-            return None;
-        }
-
-        let res = Some(self.temp_buffer.clone());
-        self.temp_buffer.clear();
-        res
+        return self.out_queue.pop_front();
     }
 }
 
@@ -290,23 +298,6 @@ mod test {
 
     #[test]
     fn expander_case4() {
-        let input = "hello  worl'd memo";
-        let input_iter = MetaSymbolExpander::new(input.chars());
-
-        let actual: Vec<String> = input_iter.collect();
-        let expected = vec![
-            "hello".to_string(),
-            " ".to_string(),
-            "worl'd".to_string(),
-            " ".to_string(),
-            "memo".to_string(),
-        ];
-
-        assert_eq!(expected, actual, "\ninput: {:#?}", input);
-    }
-
-    #[test]
-    fn expander_case5() {
         let input = "hello  \"worl'd  memo\"";
         let input_iter = MetaSymbolExpander::new(input.chars());
 
@@ -315,6 +306,23 @@ mod test {
             "hello".to_string(),
             " ".to_string(),
             "worl'd  memo".to_string(),
+        ];
+
+        assert_eq!(expected, actual, "\ninput: {:#?}", input);
+    }
+
+    #[test]
+    fn expander_case5() {
+        let input = "echo hello world";
+        let input_iter = MetaSymbolExpander::new(input.chars());
+
+        let actual: Vec<String> = input_iter.collect();
+        let expected = vec![
+            "echo".to_string(),
+            " ".to_string(),
+            "hello".to_string(),
+            " ".to_string(),
+            "world".to_string(),
         ];
 
         assert_eq!(expected, actual, "\ninput: {:#?}", input);
