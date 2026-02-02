@@ -119,9 +119,33 @@ impl<'a> MetaSymbolExpander<'a> {
             return;
         }
 
-        let fn_for_normal = |s: &mut Self, normal_char: char| {};
-        let fn_for_special = |s: &mut Self, special_char: MetaChar| {};
-        let fn_for_separator = |s: &mut Self, separator_char: Separator| {};
+        let fn_for_normal = |s: &mut Self, normal_char: char| {
+            if s.active_special.is_some() {
+                s.exansion_buffer.push(normal_char);
+            } else {
+                s.temp_buffer.push(normal_char);
+            }
+        };
+
+        let fn_for_special = |s: &mut Self, special_char: MetaChar| {
+            if s.active_separator
+                .is_some_and(|s| s.allows_meta_char(&special_char))
+                || s.active_separator.is_none()
+            {
+                if s.active_special.is_some() {
+                    s.exansion_buffer.push(special_char.name())
+                } else {
+                    s.active_special = Some(special_char);
+                }
+            } else {
+                s.temp_buffer.push(special_char.name());
+            }
+        };
+        let fn_for_separator = |s: &mut Self, separator_char: Separator| {
+            if s.active_separator.is_some_and(|sep| sep == separator_char) {
+            } else {
+            }
+        };
 
         if let MetaSymbolExpanderMode::Chunking = self.mode {
             self.act_on_special_or_separator_or_else(
