@@ -141,9 +141,45 @@ impl<'a> MetaSymbolExpander<'a> {
                 s.temp_buffer.push(special_char.name());
             }
         };
+
         let fn_for_separator = |s: &mut Self, separator_char: Separator| {
-            if s.active_separator.is_some_and(|sep| sep == separator_char) {
+            let Some(active_sep_char) = s.active_separator else {
+                if let Some(special_char) = s.active_special {
+                    s.temp_buffer
+                        .push_str(&special_char.expand(&s.exansion_buffer));
+                    s.exansion_buffer.clear();
+                    s.active_special = None;
+                }
+                match separator_char {
+                    Separator::Whitespace(_) => {}
+                    _ => {
+                        s.active_separator = Some(separator_char);
+                    }
+                }
+                if !s.temp_buffer.is_empty() {
+                    s.mode = MetaSymbolExpanderMode::ChunkReady;
+                }
+
+                return;
+            };
+
+            if active_sep_char == separator_char {
+                dbg!(active_sep_char, separator_char);
+                s.active_separator = None;
+                if let Some(special_char) = s.active_special {
+                    s.temp_buffer
+                        .push_str(&special_char.expand(&s.exansion_buffer));
+                    s.exansion_buffer.clear();
+                    s.active_special = None;
+                }
+                s.mode = MetaSymbolExpanderMode::ChunkReady;
             } else {
+                dbg!(active_sep_char, separator_char);
+                if s.active_special.is_some() {
+                    s.exansion_buffer.push(separator_char.name());
+                } else {
+                    s.temp_buffer.push(separator_char.name());
+                }
             }
         };
 
@@ -213,19 +249,19 @@ mod test {
         let input = "\"hello\" \"world\"";
         let input_iter = MetaSymbolExpander::new(input.chars());
 
-        let collected_input: Vec<String> = input_iter.collect();
-        let actual = vec!["hello".to_string(), " ".to_string(), "world".to_string()];
+        let actual: Vec<String> = input_iter.collect();
+        let expected = vec!["hello".to_string(), " ".to_string(), "world".to_string()];
 
-        assert_eq!(collected_input, actual);
+        assert_eq!(expected, actual, "\ninput: ${:#?}", input);
     }
 
     #[test]
-    fn expanded_case_2() {
+    fn expander_case2() {
         let input = "\"hello\"  \"world\" memo";
         let input_iter = MetaSymbolExpander::new(input.chars());
 
-        let collected_input: Vec<String> = input_iter.collect();
-        let actual = vec![
+        let actual: Vec<String> = input_iter.collect();
+        let expected = vec![
             "hello".to_string(),
             " ".to_string(),
             "world".to_string(),
@@ -233,15 +269,15 @@ mod test {
             "memo".to_string(),
         ];
 
-        assert_eq!(collected_input, actual);
+        assert_eq!(expected, actual, "\ninput: ${:#?}", input);
     }
     #[test]
-    fn expanded_case_3() {
+    fn expander_case3() {
         let input = "hello  world memo";
         let input_iter = MetaSymbolExpander::new(input.chars());
 
-        let collected_input: Vec<String> = input_iter.collect();
-        let actual = vec![
+        let actual: Vec<String> = input_iter.collect();
+        let expected = vec![
             "hello".to_string(),
             " ".to_string(),
             "world".to_string(),
@@ -249,16 +285,16 @@ mod test {
             "memo".to_string(),
         ];
 
-        assert_eq!(collected_input, actual);
+        assert_eq!(expected, actual, "\ninput: ${:#?}", input);
     }
 
     #[test]
-    fn expanded_case_4() {
+    fn expander_case4() {
         let input = "hello  worl'd memo";
         let input_iter = MetaSymbolExpander::new(input.chars());
 
-        let collected_input: Vec<String> = input_iter.collect();
-        let actual = vec![
+        let actual: Vec<String> = input_iter.collect();
+        let expected = vec![
             "hello".to_string(),
             " ".to_string(),
             "worl'd".to_string(),
@@ -266,21 +302,21 @@ mod test {
             "memo".to_string(),
         ];
 
-        assert_eq!(collected_input, actual);
+        assert_eq!(expected, actual, "\ninput: {:#?}", input);
     }
 
     #[test]
-    fn expanded_case_5() {
+    fn expander_case5() {
         let input = "hello  \"worl'd  memo\"";
         let input_iter = MetaSymbolExpander::new(input.chars());
 
-        let collected_input: Vec<String> = input_iter.collect();
-        let actual = vec![
+        let actual: Vec<String> = input_iter.collect();
+        let expected = vec![
             "hello".to_string(),
             " ".to_string(),
             "worl'd  memo".to_string(),
         ];
 
-        assert_eq!(collected_input, actual);
+        assert_eq!(expected, actual, "\ninput: {:#?}", input);
     }
 }
