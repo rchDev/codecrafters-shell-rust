@@ -122,11 +122,13 @@ pub struct MetaSymbolExpander<'a> {
     mode: MetaSymbolExpanderMode,
     active_zoning: Option<ZoningChar>,
     active_special: Option<SpecialChar>,
+    dbg_run: usize,
 }
 
 impl<'a> MetaSymbolExpander<'a> {
     pub fn new(chars: Chars) -> MetaSymbolExpander {
         MetaSymbolExpander {
+            dbg_run: 0,
             chars,
             temp_buffer: String::with_capacity(10),
             expansion_buffer: String::with_capacity(10),
@@ -202,11 +204,10 @@ impl<'a> MetaSymbolExpander<'a> {
                     } else {
                         s.active_zoning = Some(zoning_char);
                     }
-                    dbg!(special_char, zoning_char, &s.expansion_buffer);
                     s.temp_buffer
                         .push_str(&special_char.expand(&s.expansion_buffer));
                     s.expansion_buffer.clear();
-                    s.active_zoning = None;
+                    s.active_special = None;
                 } else {
                     s.active_zoning = Some(zoning_char);
                 }
@@ -263,6 +264,8 @@ impl<'a> MetaSymbolExpander<'a> {
                 fn_for_else(self, c);
             }
         }
+
+        self.dbg_run += 1;
     }
 }
 
@@ -371,12 +374,12 @@ mod test {
 
     #[test]
     fn expander_case7() {
-        let input = "\'\"test hello\"\'";
+        let input = r#"\'\"test hello\"\'"#;
 
         let input_iter = MetaSymbolExpander::new(input.chars());
 
         let actual: Vec<String> = input_iter.collect();
-        let expected = vec!["'\"test hello\"'".to_string()];
+        let expected = vec!["'\"test".to_string(), "hello\"'".to_string()];
         assert_eq!(expected, actual, "\ninput: {:#?}", input);
     }
 }
