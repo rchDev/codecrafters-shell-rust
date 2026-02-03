@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, env, str::Chars};
+use std::{env, str::Chars};
 
 #[derive(PartialEq, Debug, Copy, Clone)]
 pub enum SpecialChar {
@@ -19,15 +19,46 @@ impl SpecialChar {
         }
     }
 
-    pub fn expand(&self, expansion_buf: &str) -> String {
-        match self {
-            Self::Dollar => env::var(expansion_buf).unwrap(),
-            Self::Star => self.name().to_string(),
-            Self::Tilde => {
-                let home_dir = env::home_dir().unwrap();
-                home_dir.into_os_string().into_string().unwrap()
+    pub fn expand(&self, expansion_buf: &str, modifier: &Option<ModifierChar>) -> String {
+        if let Some(active_mod) = modifier {
+            if active_mod.allows_special_char(self) {
+                match self {
+                    Self::Dollar => env::var(expansion_buf).unwrap(),
+                    Self::Star => self.name().to_string(),
+                    Self::Tilde => {
+                        let home_dir = env::home_dir().unwrap();
+                        home_dir.into_os_string().into_string().unwrap()
+                    }
+                    Self::Backslash => {
+                        if *active_mod == ModifierChar::DoubleQuote {
+                            let allowed = match expansion_buf {
+                                "\"" => true,
+                                "\\" => true,
+                                _ => false,
+                            };
+                            if allowed {
+                                expansion_buf.to_owned()
+                            } else {
+                                "\\".to_string() + expansion_buf
+                            }
+                        } else {
+                            expansion_buf.to_owned()
+                        }
+                    }
+                }
+            } else {
+                self.name().to_string()
             }
-            Self::Backslash => expansion_buf.to_owned(),
+        } else {
+            match self {
+                Self::Dollar => env::var(expansion_buf).unwrap(),
+                Self::Star => self.name().to_string(),
+                Self::Tilde => {
+                    let home_dir = env::home_dir().unwrap();
+                    home_dir.into_os_string().into_string().unwrap()
+                }
+                Self::Backslash => expansion_buf.to_owned(),
+            }
         }
     }
 }
@@ -46,16 +77,16 @@ impl TryFrom<char> for SpecialChar {
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]
-pub enum ZoningChar {
+pub enum ModifierChar {
     SingleQuote,
     DoubleQuote,
 }
 
-impl ZoningChar {
-    pub fn allows_special_char(&self, meta_char: &SpecialChar) -> bool {
+impl ModifierChar {
+    pub fn allows_special_char(&self, special_char: &SpecialChar) -> bool {
         match self {
             Self::SingleQuote => false,
-            Self::DoubleQuote => match meta_char {
+            Self::DoubleQuote => match special_char {
                 SpecialChar::Dollar => true,
                 SpecialChar::Backslash => true,
                 _ => false,
@@ -72,7 +103,7 @@ impl ZoningChar {
     }
 }
 
-impl TryFrom<char> for ZoningChar {
+impl TryFrom<char> for ModifierChar {
     type Error = ();
     fn try_from(value: char) -> Result<Self, Self::Error> {
         match value {
@@ -120,7 +151,7 @@ pub struct MetaSymbolExpander<'a> {
     temp_buffer: String,
     expansion_buffer: String,
     mode: MetaSymbolExpanderMode,
-    active_zoning: Option<ZoningChar>,
+    active_mod: Option<ModifierChar>,
     active_special: Option<SpecialChar>,
     dbg_run: usize,
 }
@@ -133,7 +164,7 @@ impl<'a> MetaSymbolExpander<'a> {
             temp_buffer: String::with_capacity(10),
             expansion_buffer: String::with_capacity(10),
             mode: MetaSymbolExpanderMode::Chunking,
-            active_zoning: None,
+            active_mod: None,
             active_special: None,
         }
     }
@@ -149,7 +180,8 @@ impl<'a> MetaSymbolExpander<'a> {
             if let Some(special) = s.active_special {
                 s.expansion_buffer.push(normal_char);
                 if special == SpecialChar::Backslash {
-                    s.temp_buffer.push_str(&special.expand(&s.expansion_buffer));
+                    s.temp_buffer
+                        .push_str(&special.expand(&s.expansion_buffer, &s.active_mod));
                     s.expansion_buffer.clear();
                     s.active_special = None;
                 }
@@ -159,21 +191,29 @@ impl<'a> MetaSymbolExpander<'a> {
         };
 
         let fn_for_special = |s: &mut Self, special_char: SpecialChar| {
-            if s.active_zoning
+            if s.active_mod
                 .is_some_and(|s| s.allows_special_char(&special_char))
-                || s.active_zoning.is_none()
+                || s.active_mod.is_none()
             {
+                // dbg!(
+                //     "active-mod is some and allows new special char",
+                //     special_char
+                // );
                 if let Some(active_spec_char) = s.active_special {
+                    // dbg!("there is another special char");
                     s.expansion_buffer.push(special_char.name());
                     if let SpecialChar::Backslash = active_spec_char {
+                        // dbg!("active special char is backslash");
                         s.temp_buffer
-                            .push_str(&special_char.expand(&s.expansion_buffer));
+                            .push_str(&active_spec_char.expand(&s.expansion_buffer, &s.active_mod));
                         s.expansion_buffer.clear();
                         s.active_special = None;
                     }
                 } else if let SpecialChar::Tilde = special_char {
-                    s.temp_buffer.push_str(&special_char.expand(""));
+                    s.temp_buffer
+                        .push_str(&special_char.expand("", &s.active_mod));
                 } else {
+                    // dbg!("the new special char gets set as active special");
                     s.active_special = Some(special_char);
                 }
             } else {
@@ -181,36 +221,72 @@ impl<'a> MetaSymbolExpander<'a> {
             }
         };
 
-        let fn_for_zoning = |s: &mut Self, zoning_char: ZoningChar| {
-            if let Some(current_zoning_char) = s.active_zoning {
-                if current_zoning_char == zoning_char {
+        let fn_for_mod = |s: &mut Self, new_mod_char: ModifierChar| {
+            // dbg!("here comes a new mod char", new_mod_char, s.dbg_run);
+            if let Some(current_mod_char) = s.active_mod {
+                // dbg!(
+                //     "but there's another mod char active",
+                //     "are they equal?",
+                //     s.dbg_run
+                // );
+                if current_mod_char == new_mod_char {
+                    // dbg!("yes. Is there a special char?", s.dbg_run);
                     if let Some(special_char) = s.active_special {
+                        // dbg!("yes. Is it a backslash?", s.dbg_run);
                         if special_char == SpecialChar::Backslash {
-                            s.expansion_buffer.push(zoning_char.name());
+                            s.expansion_buffer.push(new_mod_char.name());
+                            // dbg!("yes.", &s.expansion_buffer, s.dbg_run);
+                        } else {
+                            // dbg!("no. active zone - deativated", s.dbg_run);
+                            s.active_mod = None;
                         }
                         s.temp_buffer
-                            .push_str(&special_char.expand(&s.expansion_buffer));
+                            .push_str(&special_char.expand(&s.expansion_buffer, &s.active_mod));
                         s.expansion_buffer.clear();
+                        // dbg!(
+                        //     "expansion buffer expanded and merged with temp buffer",
+                        //     s.dbg_run
+                        // );
                         s.active_special = None;
                     } else {
-                        s.active_zoning = None;
+                        // dbg!("no. active zone disabled", s.dbg_run);
+                        s.active_mod = None;
                     }
                 } else {
-                    s.temp_buffer.push(zoning_char.name());
+                    // dbg!(
+                    //     "no. New zoning_char gets pushed to the temp buffer",
+                    //     &s.temp_buffer,
+                    //     s.dbg_run
+                    // );
+                    if let Some(special_char) = s.active_special
+                        && special_char == SpecialChar::Backslash
+                    {
+                        // dbg!(
+                        //     "there is also an active backslash that gets disabled",
+                        //     s.active_special
+                        // );
+                        s.expansion_buffer.push(new_mod_char.name());
+                        s.temp_buffer
+                            .push_str(&special_char.expand(&s.expansion_buffer, &s.active_mod));
+                        s.active_special = None;
+                        s.expansion_buffer.clear();
+                    } else {
+                        s.temp_buffer.push(new_mod_char.name());
+                    }
                 }
             } else {
                 if let Some(special_char) = s.active_special {
                     if special_char == SpecialChar::Backslash {
-                        s.expansion_buffer.push(zoning_char.name());
+                        s.expansion_buffer.push(new_mod_char.name());
                     } else {
-                        s.active_zoning = Some(zoning_char);
+                        s.active_mod = Some(new_mod_char);
                     }
                     s.temp_buffer
-                        .push_str(&special_char.expand(&s.expansion_buffer));
+                        .push_str(&special_char.expand(&s.expansion_buffer, &s.active_mod));
                     s.expansion_buffer.clear();
                     s.active_special = None;
                 } else {
-                    s.active_zoning = Some(zoning_char);
+                    s.active_mod = Some(new_mod_char);
                 }
             }
         };
@@ -223,7 +299,7 @@ impl<'a> MetaSymbolExpander<'a> {
                 }
 
                 s.temp_buffer
-                    .push_str(&special_char.expand(&s.expansion_buffer));
+                    .push_str(&special_char.expand(&s.expansion_buffer, &s.active_mod));
                 s.expansion_buffer.clear();
                 s.active_special = None;
 
@@ -231,7 +307,7 @@ impl<'a> MetaSymbolExpander<'a> {
                     return;
                 }
             }
-            if s.active_zoning.is_some() {
+            if s.active_mod.is_some() {
                 s.temp_buffer.push(separator.name());
             } else if !s.temp_buffer.is_empty() {
                 s.mode = MetaSymbolExpanderMode::ChunkReady;
@@ -240,7 +316,7 @@ impl<'a> MetaSymbolExpander<'a> {
         self.apply_special_or_meta_or_separator_or_else(
             next_char,
             fn_for_special,
-            fn_for_zoning,
+            fn_for_mod,
             fn_for_separator,
             fn_for_normal,
         );
@@ -250,15 +326,15 @@ impl<'a> MetaSymbolExpander<'a> {
         &mut self,
         character: Option<char>,
         mut fn_for_meta: impl FnMut(&mut Self, SpecialChar),
-        mut fn_for_zoning: impl FnMut(&mut Self, ZoningChar),
+        mut fn_for_mod: impl FnMut(&mut Self, ModifierChar),
         mut fn_for_separator: impl FnMut(&mut Self, Separator),
         mut fn_for_else: impl FnMut(&mut Self, char),
     ) {
         if let Some(c) = character {
             if let Ok(meta_char) = SpecialChar::try_from(c) {
                 fn_for_meta(self, meta_char);
-            } else if let Ok(zoning_char) = ZoningChar::try_from(c) {
-                fn_for_zoning(self, zoning_char);
+            } else if let Ok(mod_char) = ModifierChar::try_from(c) {
+                fn_for_mod(self, mod_char);
             } else if let Ok(separator) = Separator::try_from(c) {
                 fn_for_separator(self, separator);
             } else {
@@ -394,5 +470,37 @@ mod test {
         let expected = "mixed\"quote'example'\\".to_string();
 
         assert_eq!(expected, actual, "\ninput: {:#?}", input);
+    }
+
+    #[test]
+    fn expander_case9() {
+        let input = r#""exe with \'single quotes\'" /tmp/cow/f3"#;
+
+        let mut input_iter = MetaSymbolExpander::new(input.chars());
+
+        let actual_command = input_iter.next().unwrap();
+        let actual_args = input_iter.next().unwrap();
+
+        let expected_command = r#"exe with \'single quotes\'"#.to_string();
+        let expected_args = "/tmp/cow/f3";
+
+        assert_eq!(expected_command, actual_command);
+        assert_eq!(expected_args, actual_args);
+    }
+
+    #[test]
+    fn expander_case10() {
+        let input = r#"'exe with "quotes"' /tmp/cow/f3"#;
+
+        let mut input_iter = MetaSymbolExpander::new(input.chars());
+
+        let actual_command = input_iter.next().unwrap();
+        let actual_args = input_iter.next().unwrap();
+
+        let expected_command = "exe with \"quotes\"".to_string();
+        let expected_args = "/tmp/cow/f3";
+
+        assert_eq!(expected_command, actual_command);
+        assert_eq!(expected_args, actual_args);
     }
 }

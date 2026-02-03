@@ -54,7 +54,7 @@ impl Command {
                         args: args,
                     }
                 }
-                None => Command::None(trimmed_input.to_string()),
+                None => Command::None(command),
             },
         }
     }
