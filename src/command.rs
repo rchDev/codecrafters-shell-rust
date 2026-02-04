@@ -22,45 +22,84 @@ pub enum Command {
     None(String),
 }
 
-impl Command {
-    pub fn parse(input: &str) -> Command {
-        let trimmed_input = input.trim();
-        let mut args = MetaSymbolExpander::new(trimmed_input.chars());
-        let command = args.next().unwrap_or("".to_string());
+#[derive(Debug, PartialEq)]
+enum CommandPartial {
+    Exit,
+    Echo,
+    Type,
+    Pwd,
+    Cd,
+    External(PathBuf),
+    None(String),
+}
 
-        match &command[..] {
-            "exit" => Command::Exit,
-            "echo" => {
-                let args: Vec<String> = args.collect();
-                Command::Echo(args.join(" "))
-            }
-            "type" => {
-                let inner_commands: Vec<Command> = args
-                    .filter(|arg| !Command::str_contains_only_whitespace(arg.as_ref()))
-                    .map(|arg| Command::parse(&arg))
-                    .collect();
-                Command::Type(inner_commands)
-            }
-            "pwd" => Command::Pwd,
-            "cd" => {
-                let args: Vec<String> = args.collect();
-                Command::Cd(PathBuf::from(args.join("")))
-            }
+impl CommandPartial {
+    fn parse(input: &str) -> CommandPartial {
+        match input {
+            "exit" => Self::Exit,
+            "echo" => Self::Echo,
+            "type" => Self::Type,
+            "pwd" => Self::Pwd,
+            "cd" => Self::Cd,
             other => match Command::get_executable_path(other) {
-                Some(exec_path) => {
-                    let args: Vec<String> = args.collect();
-                    Command::External {
-                        exec_path,
-                        args: args,
-                    }
-                }
-                None => Command::None(command),
+                Some(path) => Self::External(path),
+                None => Self::None(other.to_string()),
             },
         }
     }
 
-    fn str_contains_only_whitespace(input: &str) -> bool {
-        input.trim().is_empty()
+    fn can_be_chained_with(&self, _other: &CommandPartial) -> bool {
+        match self {
+            _ => false,
+        }
+    }
+
+    fn into_full(&self, args: &Vec<String>) -> Command {
+        match self {
+            Self::Exit => Command::Exit,
+            Self::Echo => Command::Echo(args.join(" ")),
+            Self::Pwd => Command::Pwd,
+            Self::Cd => Command::Cd(PathBuf::from(args.join(""))),
+            Self::Type => {
+                let inner_commands: Vec<Command> =
+                    args.iter().flat_map(|arg| Command::parse(arg)).collect();
+                Command::Type(inner_commands)
+            }
+            Self::External(path) => Command::External {
+                exec_path: path.clone(),
+                args: args.into_iter().map(|s| s.to_string()).collect(),
+            },
+            Self::None(command_name) => Command::None(command_name.clone()),
+        }
+    }
+}
+
+impl Command {
+    pub fn parse(input: &str) -> Vec<Command> {
+        let trimmed_input = input.trim();
+        let tokens_iter = MetaSymbolExpander::new(trimmed_input.chars());
+
+        let mut commands: Vec<Command> = Vec::with_capacity(10);
+
+        let (mut current_partial, mut current_args) = (None::<CommandPartial>, Vec::new());
+
+        for token in tokens_iter {
+            if current_partial.is_none() {
+                current_partial = Some(CommandPartial::parse(&token));
+                continue;
+            }
+
+            let partial_cmd = CommandPartial::parse(&token);
+            if partial_cmd.can_be_chained_with(current_partial.as_ref().unwrap()) {
+                commands.push(current_partial.unwrap().into_full(&current_args));
+                current_partial = None;
+                current_args.clear();
+            } else {
+                current_args.push(token);
+            }
+        }
+
+        commands
     }
 
     fn get_executable_path(input: &str) -> Option<PathBuf> {

@@ -19,7 +19,7 @@ fn main() {
             }
         };
 
-        let cmd = Command::parse(&input);
-        shell.exec_command(cmd);
+        let commands = Command::parse(&input);
+        shell.exec_command(commands);
     }
 }
