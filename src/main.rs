@@ -20,6 +20,7 @@ fn main() {
         };
 
         let commands = Command::parse(&input);
+
         shell.exec_command(commands);
     }
 }

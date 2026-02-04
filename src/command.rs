@@ -99,6 +99,10 @@ impl Command {
             }
         }
 
+        if let Some(partial_cmd) = current_partial {
+            commands.push(partial_cmd.into_full(&current_args));
+        }
+
         commands
     }
 
