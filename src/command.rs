@@ -15,6 +15,7 @@ pub enum Command {
     Type(Vec<Command>),
     Pwd,
     Cd(PathBuf),
+    StdoutRedirect(PathBuf),
     External {
         exec_path: PathBuf,
         args: Vec<String>,
@@ -29,6 +30,7 @@ enum CommandPartial {
     Type,
     Pwd,
     Cd,
+    StdoutRedirect,
     External(PathBuf),
     None(String),
 }
@@ -36,6 +38,7 @@ enum CommandPartial {
 impl CommandPartial {
     fn parse(input: &str) -> CommandPartial {
         match input {
+            ">" | "1>" => Self::StdoutRedirect,
             "exit" => Self::Exit,
             "echo" => Self::Echo,
             "type" => Self::Type,
@@ -48,8 +51,11 @@ impl CommandPartial {
         }
     }
 
-    fn can_be_chained_with(&self, _other: &CommandPartial) -> bool {
+    fn can_be_chained_after(&self, other: &CommandPartial) -> bool {
         match self {
+            Self::StdoutRedirect => match other {
+                _ => true,
+            },
             _ => false,
         }
     }
@@ -60,6 +66,7 @@ impl CommandPartial {
             Self::Echo => Command::Echo(args.join(" ")),
             Self::Pwd => Command::Pwd,
             Self::Cd => Command::Cd(PathBuf::from(args.join(""))),
+            Self::StdoutRedirect => Command::StdoutRedirect(PathBuf::from(args.join(""))),
             Self::Type => {
                 let inner_commands: Vec<Command> =
                     args.iter().flat_map(|arg| Command::parse(arg)).collect();
@@ -90,7 +97,7 @@ impl Command {
             }
 
             let partial_cmd = CommandPartial::parse(&token);
-            if partial_cmd.can_be_chained_with(current_partial.as_ref().unwrap()) {
+            if partial_cmd.can_be_chained_after(current_partial.as_ref().unwrap()) {
                 commands.push(current_partial.unwrap().into_full(&current_args));
                 current_partial = None;
                 current_args.clear();
@@ -132,6 +139,7 @@ impl fmt::Display for Command {
             Command::Echo(_) => write!(f, "echo"),
             Command::Cd(_) => write!(f, "cd"),
             Command::Type(_) => write!(f, "type"),
+            Command::StdoutRedirect(_) => write!(f, ">"),
             Command::External { exec_path, .. } => {
                 write!(
                     f,

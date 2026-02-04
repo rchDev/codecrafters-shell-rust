@@ -24,21 +24,28 @@ impl Shell {
     }
 
     pub fn exec_command(&mut self, commands: Vec<Command>) {
-        let _command_results: Vec<Vec<String>> = Vec::with_capacity(commands.len());
+        let mut cmd_out_for_display: Vec<Result<String, String>> =
+            Vec::with_capacity(commands.len());
 
         for cmd in commands {
-            match cmd {
+            match &cmd {
                 Command::Cd(exec_path) => {
                     match env::set_current_dir(&exec_path) {
                         Ok(_) => self.change_dir(env::current_dir().unwrap()),
                         Err(_) => {
-                            eprintln!("cd: {}: No such file or directory", exec_path.display())
+                            cmd_out_for_display.push(Err(format!(
+                                "cd: {}: No such file or directory",
+                                exec_path.display()
+                            )));
                         }
                     };
                 }
                 Command::Echo(msg) => {
-                    println!("{}", msg.trim());
+                    cmd_out_for_display.push(Ok(format!("{}", msg)));
                 }
+
+                Command::StdoutRedirect(file_path) => {}
+
                 Command::External { exec_path, args } => {
                     let filename = exec_path
                         .file_name()
@@ -55,28 +62,44 @@ impl Shell {
                 Command::Type(inner_commands) => {
                     for command in inner_commands {
                         match command {
-                            Command::None(name) => println!("{name}: not found"),
-                            Command::External { exec_path, args: _ } => println!(
-                                "{} is {}",
-                                exec_path.file_name().unwrap_or_default().display(),
-                                exec_path.display()
-                            ),
-                            builtin => println!("{builtin} is a shell builtin"),
+                            Command::None(name) => {
+                                cmd_out_for_display.push(Err(format!("{name}: not found")));
+                            }
+                            Command::External { exec_path, args: _ } => {
+                                let res = format!(
+                                    "{} is {}",
+                                    exec_path.file_name().unwrap_or_default().display(),
+                                    exec_path.display()
+                                );
+                                cmd_out_for_display.push(Ok(res));
+                            }
+                            builtin => {
+                                cmd_out_for_display
+                                    .push(Ok(format!("{builtin} is a shell builtin")));
+                            }
                         }
                     }
                 }
                 Command::Pwd => {
-                    println!("{}", self.working_dir.display());
+                    cmd_out_for_display.push(Ok(format!("{}", self.working_dir.display())));
                 }
                 Command::Exit => {
                     process::exit(0);
                 }
                 Command::None(cmd_name) => {
-                    println!("{cmd_name}: command not found")
+                    cmd_out_for_display.push(Err(format!("{cmd_name}: command not found")));
                 }
             }
         }
+
+        for result in command_results {
+            match result {
+                Ok(res_text) => println!("{res_text}"),
+                Err(err_text) => eprintln!("{err_text}"),
+            }
+        }
     }
+
     fn change_dir(&mut self, path: PathBuf) {
         self.working_dir = path;
     }
