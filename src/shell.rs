@@ -1,14 +1,17 @@
 pub use crate::command::Command;
+use crate::command::CommandResult;
 
 use std::{
     env,
+    fs::File,
+    io::{self, Stdout, Write},
     path::PathBuf,
-    process,
-    process::{Command as StdProcCmd, Stdio},
+    process::{self, Command as StdProcCmd, Stdio},
 };
-
 pub struct Shell {
     working_dir: PathBuf,
+    stdout_redirect_path: Option<PathBuf>,
+    stderr_redirect_path: Option<PathBuf>,
 }
 
 impl Shell {
@@ -20,31 +23,28 @@ impl Shell {
     pub fn new() -> Self {
         Self {
             working_dir: env::current_dir().unwrap(),
+            stdout_redirect_path: None,
+            stderr_redirect_path: None,
         }
     }
 
-    pub fn exec_command(&mut self, commands: Vec<Command>) {
-        let mut cmd_out_for_display: Vec<Result<String, String>> =
-            Vec::with_capacity(commands.len());
-
-        for cmd in commands {
+    pub fn exec_command(&mut self, command_result: CommandResult) {
+        for cmd in command_result.commands {
             match &cmd {
                 Command::Cd(exec_path) => {
                     match env::set_current_dir(&exec_path) {
                         Ok(_) => self.change_dir(env::current_dir().unwrap()),
                         Err(_) => {
-                            cmd_out_for_display.push(Err(format!(
-                                "cd: {}: No such file or directory",
-                                exec_path.display()
-                            )));
+                            self.display_result(
+                                format!("cd: {}: No such file or directory", exec_path.display()),
+                                io::stderr(),
+                            );
                         }
                     };
                 }
                 Command::Echo(msg) => {
-                    cmd_out_for_display.push(Ok(format!("{}", msg)));
+                    self.display_result(format!("{msg}"), io::stdout());
                 }
-
-                Command::StdoutRedirect(file_path) => {}
 
                 Command::External { exec_path, args } => {
                     let filename = exec_path
@@ -52,18 +52,19 @@ impl Shell {
                         .and_then(|n| n.to_str())
                         .unwrap_or_default();
 
-                    let _ = StdProcCmd::new(filename)
+                    let output = StdProcCmd::new(filename)
                         .args(args)
                         .stdin(Stdio::inherit())
                         .stdout(Stdio::inherit())
                         .stderr(Stdio::inherit())
-                        .status();
+                        .output();
                 }
+
                 Command::Type(inner_commands) => {
                     for command in inner_commands {
                         match command {
                             Command::None(name) => {
-                                cmd_out_for_display.push(Err(format!("{name}: not found")));
+                                self.display_result(format!("{name}: not found"), io::stderr());
                             }
                             Command::External { exec_path, args: _ } => {
                                 let res = format!(
@@ -71,32 +72,51 @@ impl Shell {
                                     exec_path.file_name().unwrap_or_default().display(),
                                     exec_path.display()
                                 );
-                                cmd_out_for_display.push(Ok(res));
+                                self.display_result(res, io::stdout());
                             }
                             builtin => {
-                                cmd_out_for_display
-                                    .push(Ok(format!("{builtin} is a shell builtin")));
+                                self.display_result(
+                                    format!("{builtin} is a shell builtin"),
+                                    io::stdout(),
+                                );
                             }
                         }
                     }
                 }
+
                 Command::Pwd => {
-                    cmd_out_for_display.push(Ok(format!("{}", self.working_dir.display())));
+                    self.display_result(format!("{}", self.working_dir.display()), io::stdout());
                 }
+
                 Command::Exit => {
                     process::exit(0);
                 }
+
                 Command::None(cmd_name) => {
-                    cmd_out_for_display.push(Err(format!("{cmd_name}: command not found")));
+                    self.display_result(format!("{cmd_name}: command not found"), io::stderr());
+                }
+
+                Command::EnviromentalModifier {
+                    stdout_redirect,
+                    stderr_redirect,
+                } => {
+                    self.stdout_redirect_path = stdout_redirect.clone();
+                    self.stderr_redirect_path = stderr_redirect.clone();
                 }
             }
         }
+    }
 
-        for result in command_results {
-            match result {
-                Ok(res_text) => println!("{res_text}"),
-                Err(err_text) => eprintln!("{err_text}"),
+    fn display_result<W: Write>(&self, text: String, mut out: W) {
+        if let Some(redirect_path) = &self.stdout_redirect_path {
+            match File::create(redirect_path) {
+                Ok(mut file_handle) => {
+                    _ = writeln!(file_handle, "{}", text);
+                }
+                Err(_) => {}
             }
+        } else {
+            _ = writeln!(out, "{}", text);
         }
     }
 

@@ -1,12 +1,18 @@
 mod meta;
 
 use std::{
-    env, fmt, fs,
+    env,
+    fmt::{self},
+    fs,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
 };
 
 use crate::command::meta::MetaSymbolExpander;
+
+const STDOUT_REDIRECT_TO_FILE_V1: &str = ">";
+const STDOUT_REDIRECT_TO_FILE_V2: &'static str = "1>";
+const STDERR_REDIRECT_TO_FILE: &str = "2>";
 
 #[derive(Debug)]
 pub enum Command {
@@ -15,7 +21,10 @@ pub enum Command {
     Type(Vec<Command>),
     Pwd,
     Cd(PathBuf),
-    StdoutRedirect(PathBuf),
+    EnviromentalModifier {
+        stdout_redirect: Option<PathBuf>,
+        stderr_redirect: Option<PathBuf>,
+    },
     External {
         exec_path: PathBuf,
         args: Vec<String>,
@@ -30,32 +39,23 @@ enum CommandPartial {
     Type,
     Pwd,
     Cd,
-    StdoutRedirect,
-    External(PathBuf),
-    None(String),
+    Unknown(String),
 }
 
 impl CommandPartial {
     fn parse(input: &str) -> CommandPartial {
         match input {
-            ">" | "1>" => Self::StdoutRedirect,
             "exit" => Self::Exit,
             "echo" => Self::Echo,
             "type" => Self::Type,
             "pwd" => Self::Pwd,
             "cd" => Self::Cd,
-            other => match Command::get_executable_path(other) {
-                Some(path) => Self::External(path),
-                None => Self::None(other.to_string()),
-            },
+            other => Self::Unknown(other.to_string()),
         }
     }
 
-    fn can_be_chained_after(&self, other: &CommandPartial) -> bool {
+    fn can_be_chained_after(&self, _other: &CommandPartial) -> bool {
         match self {
-            Self::StdoutRedirect => match other {
-                _ => true,
-            },
             _ => false,
         }
     }
@@ -66,23 +66,30 @@ impl CommandPartial {
             Self::Echo => Command::Echo(args.join(" ")),
             Self::Pwd => Command::Pwd,
             Self::Cd => Command::Cd(PathBuf::from(args.join(""))),
-            Self::StdoutRedirect => Command::StdoutRedirect(PathBuf::from(args.join(""))),
             Self::Type => {
-                let inner_commands: Vec<Command> =
-                    args.iter().flat_map(|arg| Command::parse(arg)).collect();
+                let inner_commands: Vec<Command> = args
+                    .iter()
+                    .flat_map(|arg| Command::parse(arg).commands)
+                    .collect();
                 Command::Type(inner_commands)
             }
-            Self::External(path) => Command::External {
-                exec_path: path.clone(),
-                args: args.into_iter().map(|s| s.to_string()).collect(),
-            },
-            Self::None(command_name) => Command::None(command_name.clone()),
+            Self::Unknown(value) => {
+                let exec_path = Command::get_executable_path(value);
+                if let Some(path) = exec_path {
+                    Command::External {
+                        exec_path: path,
+                        args: args.iter().map(|arg| String::from(arg)).collect(),
+                    }
+                } else {
+                    Command::None(value.clone())
+                }
+            }
         }
     }
 }
 
 impl Command {
-    pub fn parse(input: &str) -> Vec<Command> {
+    pub fn parse(input: &str) -> CommandResult<'_> {
         let trimmed_input = input.trim();
         let tokens_iter = MetaSymbolExpander::new(trimmed_input.chars());
 
@@ -90,13 +97,21 @@ impl Command {
 
         let (mut current_partial, mut current_args) = (None::<CommandPartial>, Vec::new());
 
-        for token in tokens_iter {
+        let last_env_mod_index = 0;
+
+        commands.push(Command::EnviromentalModifier {
+            stderr_redirect: None,
+            stdout_redirect: None,
+        });
+
+        for (i, token) in tokens_iter.enumerate() {
             if current_partial.is_none() {
                 current_partial = Some(CommandPartial::parse(&token));
                 continue;
             }
 
             let partial_cmd = CommandPartial::parse(&token);
+
             if partial_cmd.can_be_chained_after(current_partial.as_ref().unwrap()) {
                 commands.push(current_partial.unwrap().into_full(&current_args));
                 current_partial = None;
@@ -110,7 +125,7 @@ impl Command {
             commands.push(partial_cmd.into_full(&current_args));
         }
 
-        commands
+        CommandResult { input, commands }
     }
 
     fn get_executable_path(input: &str) -> Option<PathBuf> {
@@ -139,7 +154,9 @@ impl fmt::Display for Command {
             Command::Echo(_) => write!(f, "echo"),
             Command::Cd(_) => write!(f, "cd"),
             Command::Type(_) => write!(f, "type"),
-            Command::StdoutRedirect(_) => write!(f, ">"),
+            Command::EnviromentalModifier { .. } => {
+                write!(f, "")
+            }
             Command::External { exec_path, .. } => {
                 write!(
                     f,
@@ -151,6 +168,11 @@ impl fmt::Display for Command {
             Command::None(name) => write!(f, "{name}"),
         }
     }
+}
+
+pub struct CommandResult<'a> {
+    input: &'a str,
+    pub commands: Vec<Command>,
 }
 
 #[cfg(test)]
