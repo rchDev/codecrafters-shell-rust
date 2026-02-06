@@ -52,12 +52,32 @@ impl Shell {
                         .and_then(|n| n.to_str())
                         .unwrap_or_default();
 
-                    let output = StdProcCmd::new(filename)
-                        .args(args)
-                        .stdin(Stdio::inherit())
-                        .stdout(Stdio::inherit())
-                        .stderr(Stdio::inherit())
-                        .output();
+                    let mut cmd = StdProcCmd::new(filename);
+                    cmd.args(args).stdin(Stdio::inherit());
+
+                    if let Some(file_path) = &self.stdout_redirect_path {
+                        match File::create(file_path) {
+                            Ok(file) => {
+                                cmd.stdout(Stdio::from(file));
+                            }
+                            Err(_) => {}
+                        }
+                    } else {
+                        cmd.stdout(Stdio::inherit());
+                    }
+
+                    if let Some(file_path) = &self.stderr_redirect_path {
+                        match File::create(file_path) {
+                            Ok(file) => {
+                                cmd.stderr(Stdio::from(file));
+                            }
+                            Err(_) => {}
+                        }
+                    } else {
+                        cmd.stderr(Stdio::inherit());
+                    }
+
+                    let _ = cmd.status();
                 }
 
                 Command::Type(inner_commands) => {
