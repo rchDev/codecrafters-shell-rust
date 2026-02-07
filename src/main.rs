@@ -19,8 +19,8 @@ fn main() {
             }
         };
 
-        let commands = Command::parse(&input);
+        let command_result = Command::parse(&input);
 
-        shell.exec_command(commands);
+        shell.exec_command(command_result);
     }
 }

@@ -6,6 +6,7 @@ use std::{
     fs,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
+    thread::current,
 };
 
 use crate::command::meta::MetaSymbolExpander;
@@ -54,10 +55,15 @@ impl CommandPartial {
         }
     }
 
-    fn can_be_chained_after(&self, _other: &CommandPartial) -> bool {
-        match self {
-            Self::StdoutRedirect | Self::StderrRedirect => true,
-            _ => false,
+    fn can_be_chained_after(&self, other: &CommandPartial) -> bool {
+        match other {
+            _ => match self {
+                Self::StderrRedirect | Self::StdoutRedirect => {
+                    dbg!(format!("{:?}, can be chained after {:?}", self, other));
+                    true
+                }
+                _ => false,
+            },
         }
     }
 
@@ -120,7 +126,6 @@ impl Command {
             }
 
             let new_partial_cmd = CommandPartial::parse(&token);
-
             if new_partial_cmd.can_be_chained_after(current_partial.as_ref().unwrap()) {
                 match current_partial.as_ref().unwrap() {
                     curr_partial @ CommandPartial::StdoutRedirect
@@ -136,8 +141,12 @@ impl Command {
                                 stderr_redirect: new_stderr_redirect,
                             } = new_env_mod_cmd
                             {
-                                *stdout_redirect = new_stdout_redirect;
-                                *stderr_redirect = new_stderr_redirect;
+                                if new_stdout_redirect.is_some() {
+                                    *stdout_redirect = new_stdout_redirect;
+                                }
+                                if new_stderr_redirect.is_some() {
+                                    *stderr_redirect = new_stderr_redirect;
+                                }
                             }
                         } else {
                             unreachable!(
@@ -162,7 +171,35 @@ impl Command {
         }
 
         if let Some(partial_cmd) = current_partial {
-            commands.push(partial_cmd.into_full(&current_args));
+            match partial_cmd {
+                CommandPartial::StderrRedirect | CommandPartial::StdoutRedirect => {
+                    if let Some(Command::EnviromentalModifier {
+                        stdout_redirect,
+                        stderr_redirect,
+                    }) = commands.get_mut(last_env_mod_index)
+                    {
+                        if let Command::EnviromentalModifier {
+                            stdout_redirect: new_stdout_redirect,
+                            stderr_redirect: new_stderr_redirect,
+                        } = partial_cmd.into_full(&current_args)
+                        {
+                            if new_stdout_redirect.is_some() {
+                                *stdout_redirect = new_stdout_redirect;
+                            }
+                            if new_stderr_redirect.is_some() {
+                                *stderr_redirect = new_stderr_redirect;
+                            }
+                        }
+                    } else {
+                        unreachable!(
+                            "last_env_mod_index should point to Command::EnvironmentalModifier"
+                        );
+                    }
+                }
+                _ => {
+                    commands.push(partial_cmd.into_full(&current_args));
+                }
+            }
         }
 
         CommandResult { input, commands }
@@ -210,6 +247,7 @@ impl fmt::Display for Command {
     }
 }
 
+#[derive(Debug)]
 pub struct CommandResult<'a> {
     input: &'a str,
     pub commands: Vec<Command>,
