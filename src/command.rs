@@ -10,10 +10,6 @@ use std::{
 
 use crate::command::meta::MetaSymbolExpander;
 
-const STDOUT_REDIRECT_TO_FILE_V1: &str = ">";
-const STDOUT_REDIRECT_TO_FILE_V2: &'static str = "1>";
-const STDERR_REDIRECT_TO_FILE: &str = "2>";
-
 #[derive(Debug)]
 pub enum Command {
     Exit,
@@ -39,12 +35,16 @@ enum CommandPartial {
     Type,
     Pwd,
     Cd,
+    StdoutRedirect,
+    StderrRedirect,
     Unknown(String),
 }
 
 impl CommandPartial {
     fn parse(input: &str) -> CommandPartial {
         match input {
+            ">" | "1>" => Self::StdoutRedirect,
+            "2>" => Self::StderrRedirect,
             "exit" => Self::Exit,
             "echo" => Self::Echo,
             "type" => Self::Type,
@@ -56,6 +56,7 @@ impl CommandPartial {
 
     fn can_be_chained_after(&self, _other: &CommandPartial) -> bool {
         match self {
+            Self::StdoutRedirect | Self::StderrRedirect => true,
             _ => false,
         }
     }
@@ -66,6 +67,14 @@ impl CommandPartial {
             Self::Echo => Command::Echo(args.join(" ")),
             Self::Pwd => Command::Pwd,
             Self::Cd => Command::Cd(PathBuf::from(args.join(""))),
+            Self::StdoutRedirect => Command::EnviromentalModifier {
+                stdout_redirect: Some(PathBuf::from(args.join(""))),
+                stderr_redirect: None,
+            },
+            Self::StderrRedirect => Command::EnviromentalModifier {
+                stdout_redirect: None,
+                stderr_redirect: Some(PathBuf::from(args.join(""))),
+            },
             Self::Type => {
                 let inner_commands: Vec<Command> = args
                     .iter()
@@ -97,24 +106,55 @@ impl Command {
 
         let (mut current_partial, mut current_args) = (None::<CommandPartial>, Vec::new());
 
-        let last_env_mod_index = 0;
+        let mut last_env_mod_index = 0;
 
         commands.push(Command::EnviromentalModifier {
             stderr_redirect: None,
             stdout_redirect: None,
         });
 
-        for (i, token) in tokens_iter.enumerate() {
+        for token in tokens_iter {
             if current_partial.is_none() {
                 current_partial = Some(CommandPartial::parse(&token));
                 continue;
             }
 
-            let partial_cmd = CommandPartial::parse(&token);
+            let new_partial_cmd = CommandPartial::parse(&token);
 
-            if partial_cmd.can_be_chained_after(current_partial.as_ref().unwrap()) {
-                commands.push(current_partial.unwrap().into_full(&current_args));
-                current_partial = None;
+            if new_partial_cmd.can_be_chained_after(current_partial.as_ref().unwrap()) {
+                match current_partial.as_ref().unwrap() {
+                    curr_partial @ CommandPartial::StdoutRedirect
+                    | curr_partial @ CommandPartial::StderrRedirect => {
+                        if let Some(Command::EnviromentalModifier {
+                            stdout_redirect,
+                            stderr_redirect,
+                        }) = commands.get_mut(last_env_mod_index)
+                        {
+                            let new_env_mod_cmd = curr_partial.into_full(&current_args);
+                            if let Command::EnviromentalModifier {
+                                stdout_redirect: new_stdout_redirect,
+                                stderr_redirect: new_stderr_redirect,
+                            } = new_env_mod_cmd
+                            {
+                                *stdout_redirect = new_stdout_redirect;
+                                *stderr_redirect = new_stderr_redirect;
+                            }
+                        } else {
+                            unreachable!(
+                                "last_env_mod_index should point to Command::EnvironmentalModifier"
+                            );
+                        }
+                        commands.push(Command::EnviromentalModifier {
+                            stdout_redirect: None,
+                            stderr_redirect: None,
+                        });
+                        last_env_mod_index = commands.len() - 1;
+                    }
+                    _ => {
+                        commands.push(current_partial.unwrap().into_full(&current_args));
+                    }
+                }
+                current_partial = Some(new_partial_cmd);
                 current_args.clear();
             } else {
                 current_args.push(token);

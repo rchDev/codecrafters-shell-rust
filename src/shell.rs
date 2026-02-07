@@ -4,7 +4,7 @@ use crate::command::CommandResult;
 use std::{
     env,
     fs::File,
-    io::{self, Stdout, Write},
+    io::{self, Write},
     path::PathBuf,
     process::{self, Command as StdProcCmd, Stdio},
 };
