@@ -6,7 +6,6 @@ use std::{
     fs,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
-    thread::current,
 };
 
 use crate::command::meta::MetaSymbolExpander;
@@ -58,10 +57,7 @@ impl CommandPartial {
     fn can_be_chained_after(&self, other: &CommandPartial) -> bool {
         match other {
             _ => match self {
-                Self::StderrRedirect | Self::StdoutRedirect => {
-                    dbg!(format!("{:?}, can be chained after {:?}", self, other));
-                    true
-                }
+                Self::StderrRedirect | Self::StdoutRedirect => true,
                 _ => false,
             },
         }

@@ -94,6 +94,7 @@ impl Shell {
                                 );
                                 self.display_result(res, io::stdout());
                             }
+                            Command::EnviromentalModifier { .. } => {}
                             builtin => {
                                 self.display_result(
                                     format!("{builtin} is a shell builtin"),
