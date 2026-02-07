@@ -3,7 +3,7 @@ mod meta;
 use std::{
     env,
     fmt::{self},
-    fs,
+    fs::{self, OpenOptions},
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
 };
@@ -18,14 +18,20 @@ pub enum Command {
     Pwd,
     Cd(PathBuf),
     EnviromentalModifier {
-        stdout_redirect: Option<PathBuf>,
-        stderr_redirect: Option<PathBuf>,
+        stdout_redirect: Option<RedirectInfo>,
+        stderr_redirect: Option<RedirectInfo>,
     },
     External {
         exec_path: PathBuf,
         args: Vec<String>,
     },
     None(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct RedirectInfo {
+    pub file_path: PathBuf,
+    pub options: OpenOptions,
 }
 
 #[derive(Debug, PartialEq)]
@@ -35,16 +41,20 @@ enum CommandPartial {
     Type,
     Pwd,
     Cd,
-    StdoutRedirect,
-    StderrRedirect,
+    StdOutRedirect,
+    StdOutRedirectAppend,
+    StdErrRedirect,
+    StdErrRedirectAppend,
     Unknown(String),
 }
 
 impl CommandPartial {
     fn parse(input: &str) -> CommandPartial {
         match input {
-            ">" | "1>" => Self::StdoutRedirect,
-            "2>" => Self::StderrRedirect,
+            ">" | "1>" => Self::StdOutRedirect,
+            ">>" | "1>>" => Self::StdOutRedirectAppend,
+            "2>" => Self::StdErrRedirect,
+            "2>>" => Self::StdErrRedirectAppend,
             "exit" => Self::Exit,
             "echo" => Self::Echo,
             "type" => Self::Type,
@@ -57,7 +67,10 @@ impl CommandPartial {
     fn can_be_chained_after(&self, other: &CommandPartial) -> bool {
         match other {
             _ => match self {
-                Self::StderrRedirect | Self::StdoutRedirect => true,
+                Self::StdErrRedirect
+                | Self::StdOutRedirect
+                | Self::StdOutRedirectAppend
+                | Self::StdErrRedirectAppend => true,
                 _ => false,
             },
         }
@@ -69,14 +82,54 @@ impl CommandPartial {
             Self::Echo => Command::Echo(args.join(" ")),
             Self::Pwd => Command::Pwd,
             Self::Cd => Command::Cd(PathBuf::from(args.join(""))),
-            Self::StdoutRedirect => Command::EnviromentalModifier {
-                stdout_redirect: Some(PathBuf::from(args.join(""))),
-                stderr_redirect: None,
-            },
-            Self::StderrRedirect => Command::EnviromentalModifier {
-                stdout_redirect: None,
-                stderr_redirect: Some(PathBuf::from(args.join(""))),
-            },
+            Self::StdOutRedirect => {
+                let mut options = OpenOptions::new();
+                options.create(true).write(true).truncate(true);
+
+                Command::EnviromentalModifier {
+                    stdout_redirect: Some(RedirectInfo {
+                        file_path: PathBuf::from(args.join("")),
+                        options,
+                    }),
+                    stderr_redirect: None,
+                }
+            }
+            Self::StdErrRedirect => {
+                let mut options = OpenOptions::new();
+                options.create(true).write(true).truncate(true);
+
+                Command::EnviromentalModifier {
+                    stdout_redirect: None,
+                    stderr_redirect: Some(RedirectInfo {
+                        file_path: PathBuf::from(args.join("")),
+                        options,
+                    }),
+                }
+            }
+            Self::StdOutRedirectAppend => {
+                let mut options = OpenOptions::new();
+                options.create(true).append(true);
+
+                Command::EnviromentalModifier {
+                    stdout_redirect: Some(RedirectInfo {
+                        file_path: PathBuf::from(args.join("")),
+                        options,
+                    }),
+                    stderr_redirect: None,
+                }
+            }
+            Self::StdErrRedirectAppend => {
+                let mut options = OpenOptions::new();
+                options.create(true).append(true);
+
+                Command::EnviromentalModifier {
+                    stdout_redirect: None,
+                    stderr_redirect: Some(RedirectInfo {
+                        file_path: PathBuf::from(args.join("")),
+                        options,
+                    }),
+                }
+            }
             Self::Type => {
                 let inner_commands: Vec<Command> = args
                     .iter()
@@ -124,8 +177,10 @@ impl Command {
             let new_partial_cmd = CommandPartial::parse(&token);
             if new_partial_cmd.can_be_chained_after(current_partial.as_ref().unwrap()) {
                 match current_partial.as_ref().unwrap() {
-                    curr_partial @ CommandPartial::StdoutRedirect
-                    | curr_partial @ CommandPartial::StderrRedirect => {
+                    curr_partial @ CommandPartial::StdOutRedirect
+                    | curr_partial @ CommandPartial::StdErrRedirect
+                    | curr_partial @ CommandPartial::StdOutRedirectAppend
+                    | curr_partial @ CommandPartial::StdErrRedirectAppend => {
                         if let Some(Command::EnviromentalModifier {
                             stdout_redirect,
                             stderr_redirect,
@@ -168,7 +223,10 @@ impl Command {
 
         if let Some(partial_cmd) = current_partial {
             match partial_cmd {
-                CommandPartial::StderrRedirect | CommandPartial::StdoutRedirect => {
+                CommandPartial::StdErrRedirect
+                | CommandPartial::StdOutRedirect
+                | CommandPartial::StdErrRedirectAppend
+                | CommandPartial::StdOutRedirectAppend => {
                     if let Some(Command::EnviromentalModifier {
                         stdout_redirect,
                         stderr_redirect,
