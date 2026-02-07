@@ -123,6 +123,14 @@ impl Shell {
                 } => {
                     self.stdout_redirect_path = stdout_redirect.clone();
                     self.stderr_redirect_path = stderr_redirect.clone();
+
+                    if let Some(stdout_file) = &self.stdout_redirect_path {
+                        _ = File::create(stdout_file);
+                    }
+
+                    if let Some(stderr_file) = &self.stderr_redirect_path {
+                        _ = File::create(stderr_file);
+                    }
                 }
             }
         }
