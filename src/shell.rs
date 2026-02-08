@@ -1,4 +1,6 @@
 pub use crate::command::Command;
+pub use crate::command::completer::CommandCompleter;
+
 use crate::command::{CommandResult, RedirectInfo};
 
 use std::{

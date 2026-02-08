@@ -1,26 +1,38 @@
 #[allow(unused_imports)]
 use std::io::{self, Write, stdin};
 
-use codecrafters_shell::shell::{Command, Shell};
+use codecrafters_shell::shell::{Command, CommandCompleter, Shell};
+use rustyline::error::ReadlineError;
+use rustyline::history::DefaultHistory;
+use rustyline::{Editor, Result};
 
-fn main() {
-    // TODO: Uncomment the code below to pass the first stage
+fn main() -> Result<()> {
+    let mut rl: Editor<CommandCompleter, DefaultHistory> = Editor::new()?;
+    rl.set_helper(Some(CommandCompleter::new()));
+
     let mut shell = Shell::new();
-    'main_loop: loop {
-        print!("$ ");
-        io::stdout().flush().unwrap();
 
-        let mut input = String::new();
-        match io::stdin().read_line(&mut input) {
-            Ok(_) => {}
-            Err(e) => {
-                eprintln!("Failed to read user input: {e}");
-                continue 'main_loop;
+    loop {
+        let readline = rl.readline("$ ");
+        match readline {
+            Ok(line) => {
+                let command_result = Command::parse(&line);
+                shell.exec_command(command_result);
             }
-        };
-
-        let command_result = Command::parse(&input);
-
-        shell.exec_command(command_result);
+            Err(ReadlineError::Interrupted) => {
+                println!("CTRL-C");
+                break;
+            }
+            Err(ReadlineError::Eof) => {
+                println!("CTRL-D");
+                break;
+            }
+            Err(err) => {
+                println!("Error: {:?}", err);
+                break;
+            }
+        }
     }
+
+    Ok(())
 }

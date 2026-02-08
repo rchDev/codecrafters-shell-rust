@@ -1,3 +1,4 @@
+pub mod completer;
 mod meta;
 
 use std::{
@@ -256,7 +257,10 @@ impl Command {
             }
         }
 
-        CommandResult { input, commands }
+        CommandResult {
+            input: trimmed_input,
+            commands,
+        }
     }
 
     fn get_executable_path(input: &str) -> Option<PathBuf> {
