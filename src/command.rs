@@ -2,7 +2,9 @@ pub mod completer;
 mod meta;
 
 use std::{
+    collections::HashMap,
     env,
+    ffi::OsString,
     fmt::{self},
     fs::{self, OpenOptions},
     os::unix::fs::PermissionsExt,
@@ -303,6 +305,42 @@ impl fmt::Display for Command {
             Command::None(name) => write!(f, "{name}"),
         }
     }
+}
+
+pub fn get_external_commands(path: OsString) -> HashMap<OsString, PathBuf> {
+    let mut executables = HashMap::new();
+
+    for dir in env::split_paths(&path) {
+        let dir_iter = fs::read_dir(&dir);
+        if dir_iter.is_err() {
+            continue;
+        }
+        for entry in fs::read_dir(&dir).unwrap() {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+
+            let metadata = match entry.metadata() {
+                Ok(meta) => meta,
+                Err(_) => continue,
+            };
+
+            if metadata.is_file() {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let mode = metadata.permissions().mode();
+
+                    // Any execute bit set (user, group, or other)
+                    if mode & 0o111 != 0 {
+                        executables.insert(entry.file_name(), entry.path());
+                    }
+                }
+            }
+        }
+    }
+    executables
 }
 
 #[derive(Debug)]
