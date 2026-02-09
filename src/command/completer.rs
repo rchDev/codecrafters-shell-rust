@@ -1,26 +1,25 @@
 use rustyline::Context;
 use rustyline::completion::{Completer, Pair};
 
-pub struct CommandCompleter<T: PartialEq> {
-    corpus: PrefixTree<T>,
+pub struct CommandCompleter {
+    corpus: PrefixTree,
 }
 
-impl<T: PartialEq> CommandCompleter<T> {
-    pub fn new() -> CommandCompleter<T> {
-        CommandCompleter {
-            corpus: PrefixTree::new(),
-        }
+impl CommandCompleter {
+    pub fn new() -> CommandCompleter {
+        let corpus = PrefixTree::new();
+        CommandCompleter { corpus }
     }
 }
 
-impl<T: PartialEq> rustyline::Helper for CommandCompleter<T> {}
-impl<T: PartialEq> rustyline::highlight::Highlighter for CommandCompleter<T> {}
-impl<T: PartialEq> rustyline::validate::Validator for CommandCompleter<T> {}
-impl<T: PartialEq> rustyline::hint::Hinter for CommandCompleter<T> {
+impl rustyline::Helper for CommandCompleter {}
+impl rustyline::highlight::Highlighter for CommandCompleter {}
+impl rustyline::validate::Validator for CommandCompleter {}
+impl rustyline::hint::Hinter for CommandCompleter {
     type Hint = String;
 }
 
-impl<T: PartialEq> Completer for CommandCompleter<T> {
+impl Completer for CommandCompleter {
     type Candidate = Pair;
 
     fn complete(
@@ -39,51 +38,32 @@ impl<T: PartialEq> Completer for CommandCompleter<T> {
     }
 }
 
-struct PrefixTree<T: PartialEq> {
-    root_children: Vec<PrefixNode<T>>,
+#[derive(Debug)]
+struct PrefixTree {
+    root_children: Vec<PrefixNode>,
 }
 
-struct PrefixNode<T: PartialEq> {
-    data: T,
+#[derive(Debug, Clone)]
+struct PrefixNode {
+    data: u8,
     is_end: bool,
-    children: Vec<PrefixNode<T>>,
+    children: Vec<PrefixNode>,
 }
 
-impl<T: PartialEq> PrefixTree<T> {
-    fn new() -> PrefixTree<T> {
+impl PrefixTree {
+    fn new() -> PrefixTree {
         PrefixTree {
             root_children: Vec::new(),
         }
     }
 
-    fn add(&mut self, item: T) -> Result<(), &'static str> {
-        let children = &mut self.root_children;
-
-        loop {
-            for child in children.iter_mut() {
-                if child.data == item {
-                    if !child.is_end {
-                        child.is_end = true;
-                    }
-                    return Ok(());
-                }
-            }
-            children.push(PrefixNode {
-                data: item,
-                is_end: true,
-                children: Vec::new(),
-            });
-            return Ok(());
-        }
-    }
-
-    fn add_many<IT: Iterator<Item = T>>(&mut self, items: IT) -> Result<(), &'static str> {
+    fn add(&mut self, items: &[u8]) -> Result<(), &'static str> {
         let mut children = &mut self.root_children;
         let mut item_iter = items.into_iter().peekable();
         while let Some(item) = item_iter.next() {
             let item_is_last = item_iter.peek().is_none();
 
-            let child_idx = children.iter().position(|c| c.data == item);
+            let child_idx = children.iter().position(|c| c.data == *item);
             if let Some(idx) = child_idx {
                 let child = &mut children[idx];
                 if item_is_last {
@@ -94,15 +74,106 @@ impl<T: PartialEq> PrefixTree<T> {
                 }
                 children = &mut child.children;
             } else {
+                let index = children.len();
                 let new_node = PrefixNode {
-                    data: item,
+                    data: *item,
                     is_end: item_is_last,
                     children: Vec::new(),
                 };
                 children.push(new_node);
+                children = &mut children[index].children;
             }
         }
 
         Ok(())
+    }
+
+    fn starts_with(&self, byte_slice: &[u8]) -> Option<Vec<Vec<u8>>> {
+        let mut results: Vec<Vec<u8>> = Vec::new();
+        let mut children = &self.root_children;
+
+        let mut running_prefix: Vec<u8> = Vec::with_capacity(byte_slice.len());
+
+        for byte in byte_slice {
+            let matching_child = children.iter().find(|child| child.data == *byte);
+            if let Some(matching_node) = matching_child {
+                running_prefix.push(*byte);
+                children = &matching_node.children;
+                if byte_slice.len() == running_prefix.len() && matching_node.is_end {
+                    results.push(running_prefix.clone());
+                }
+            } else {
+                return None;
+            }
+        }
+
+        let mut search_stack: Vec<(PrefixNode, Vec<u8>)> = Vec::with_capacity(10);
+        for child in children {
+            let path_to_child = Vec::from(running_prefix.clone());
+            search_stack.push((child.clone(), path_to_child));
+        }
+
+        while !search_stack.is_empty() {
+            if let Some((node, mut path_to_node)) = search_stack.pop() {
+                path_to_node.push(node.data);
+                if node.is_end {
+                    results.push(path_to_node.clone());
+                }
+                for child in node.children {
+                    search_stack.push((child, path_to_node.clone()));
+                }
+            }
+        }
+
+        if results.len() == 0 {
+            return None;
+        }
+
+        Some(results)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::command::completer::PrefixTree;
+
+    #[test]
+    fn prefix_tree_constructed_correctly() {
+        let mut pt = PrefixTree::new();
+        let first_str = "Hello";
+        let second_str = "Halo";
+        let third_str = "Ham";
+
+        let _ = pt.add(first_str.as_bytes());
+        let _ = pt.add(second_str.as_bytes());
+        let _ = pt.add(third_str.as_bytes());
+
+        dbg!(third_str, third_str.as_bytes());
+        dbg!(&pt);
+    }
+
+    #[test]
+    fn prefix_tree_starts_with_works_correctly() {
+        let mut pt = PrefixTree::new();
+        let first_str = "Hello";
+        let second_str = "Halo";
+        let third_str = "Ham";
+        let another_str = "Helium";
+
+        let _ = pt.add(first_str.as_bytes());
+        let _ = pt.add(second_str.as_bytes());
+        let _ = pt.add(third_str.as_bytes());
+        let _ = pt.add(another_str.as_bytes());
+
+        dbg!(third_str, third_str.as_bytes());
+        dbg!(&pt);
+
+        if let Some(results) = pt.starts_with("H".as_bytes()) {
+            let results: Vec<String> = results
+                .into_iter()
+                .map(|bytes| String::from_utf8(bytes).unwrap())
+                .collect();
+            dbg!(results);
+        }
     }
 }
