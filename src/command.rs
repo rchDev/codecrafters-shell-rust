@@ -7,8 +7,7 @@ use std::{
     ffi::OsString,
     fmt::{self},
     fs::{self, OpenOptions},
-    os::unix::fs::PermissionsExt,
-    path::{Path, PathBuf},
+    path::PathBuf,
 };
 
 use crate::command::meta::MetaSymbolExpander;
@@ -83,7 +82,11 @@ impl CommandPartial {
         }
     }
 
-    fn into_full(&self, args: &Vec<String>) -> Command {
+    fn into_full(
+        &self,
+        args: &Vec<String>,
+        external_commands: &HashMap<OsString, PathBuf>,
+    ) -> Command {
         match self {
             Self::Exit => Command::Exit,
             Self::Echo => Command::Echo(args.join(" ")),
@@ -140,15 +143,15 @@ impl CommandPartial {
             Self::Type => {
                 let inner_commands: Vec<Command> = args
                     .iter()
-                    .flat_map(|arg| Command::parse(arg).commands)
+                    .flat_map(|arg| Command::parse(arg, external_commands).commands)
                     .collect();
                 Command::Type(inner_commands)
             }
             Self::Unknown(value) => {
-                let exec_path = Command::get_executable_path(value);
+                let exec_path = external_commands.get(&OsString::from(value));
                 if let Some(path) = exec_path {
                     Command::External {
-                        exec_path: path,
+                        exec_path: path.clone(),
                         args: args.iter().map(|arg| String::from(arg)).collect(),
                     }
                 } else {
@@ -160,7 +163,10 @@ impl CommandPartial {
 }
 
 impl Command {
-    pub fn parse(input: &str) -> CommandResult<'_> {
+    pub fn parse<'a>(
+        input: &'a str,
+        external_commands: &HashMap<OsString, PathBuf>,
+    ) -> CommandResult<'a> {
         let trimmed_input = input.trim();
         let tokens_iter = MetaSymbolExpander::new(trimmed_input.chars());
 
@@ -193,7 +199,8 @@ impl Command {
                             stderr_redirect,
                         }) = commands.get_mut(last_env_mod_index)
                         {
-                            let new_env_mod_cmd = curr_partial.into_full(&current_args);
+                            let new_env_mod_cmd =
+                                curr_partial.into_full(&current_args, external_commands);
                             if let Command::EnviromentalModifier {
                                 stdout_redirect: new_stdout_redirect,
                                 stderr_redirect: new_stderr_redirect,
@@ -218,7 +225,11 @@ impl Command {
                         last_env_mod_index = commands.len() - 1;
                     }
                     _ => {
-                        commands.push(current_partial.unwrap().into_full(&current_args));
+                        commands.push(
+                            current_partial
+                                .unwrap()
+                                .into_full(&current_args, external_commands),
+                        );
                     }
                 }
                 current_partial = Some(new_partial_cmd);
@@ -242,7 +253,7 @@ impl Command {
                         if let Command::EnviromentalModifier {
                             stdout_redirect: new_stdout_redirect,
                             stderr_redirect: new_stderr_redirect,
-                        } = partial_cmd.into_full(&current_args)
+                        } = partial_cmd.into_full(&current_args, external_commands)
                         {
                             if new_stdout_redirect.is_some() {
                                 *stdout_redirect = new_stdout_redirect;
@@ -258,7 +269,7 @@ impl Command {
                     }
                 }
                 _ => {
-                    commands.push(partial_cmd.into_full(&current_args));
+                    commands.push(partial_cmd.into_full(&current_args, external_commands));
                 }
             }
         }
@@ -267,23 +278,6 @@ impl Command {
             input: trimmed_input,
             commands,
         }
-    }
-
-    fn get_executable_path(input: &str) -> Option<PathBuf> {
-        let path = env::var_os("PATH").unwrap_or_default();
-        for dir in env::split_paths(&path) {
-            let exec_path = dir.join(input);
-            if Command::is_executable(&exec_path) {
-                return Some(exec_path);
-            }
-        }
-        None
-    }
-
-    fn is_executable(path: &Path) -> bool {
-        fs::metadata(path)
-            .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-            .unwrap_or(false)
     }
 }
 
