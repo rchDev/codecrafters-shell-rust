@@ -2,7 +2,7 @@ use codecrafters_shell::command::{self, BUILTIN_COMMAND_NAMES};
 use codecrafters_shell::shell::{Command, CommandCompleter, Shell};
 use rustyline::error::ReadlineError;
 use rustyline::history::DefaultHistory;
-use rustyline::{Editor, Result};
+use rustyline::{CompletionType, Config, Editor, Result};
 
 #[allow(unused_imports)]
 use std::io::{self, Write, stdin};
@@ -20,7 +20,10 @@ fn main() -> Result<()> {
     if let Err(msg) = autocompleter.add_commands(BUILTIN_COMMAND_NAMES) {
         panic!("{}", msg);
     }
-    let mut rl: Editor<CommandCompleter, DefaultHistory> = Editor::new()?;
+    let config = Config::builder()
+        .completion_type(CompletionType::List) // or CompletionType::List
+        .build();
+    let mut rl: Editor<CommandCompleter, DefaultHistory> = Editor::with_config(config)?;
     rl.set_helper(Some(autocompleter));
 
     let mut shell = Shell::new();

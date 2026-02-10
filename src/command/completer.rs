@@ -47,7 +47,7 @@ impl Completer for CommandCompleter {
                 results
                     .iter()
                     .map(|result| Pair {
-                        display: String::new(),
+                        display: String::from(result),
                         replacement: String::from(&result[pos..]) + " ",
                     })
                     .collect(),
