@@ -13,6 +13,10 @@ use std::{
 
 use crate::command::meta::MetaSymbolExpander;
 
+pub const BUILTIN_COMMAND_NAMES: &[&str] = &[
+    "exit", "echo", "type", "pwd", "cd", ">", "1>", "2>", ">>", "1>>", "2>>",
+];
+
 #[derive(Debug)]
 pub enum Command {
     Exit,

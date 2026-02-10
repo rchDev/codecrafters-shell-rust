@@ -2,13 +2,26 @@ use rustyline::Context;
 use rustyline::completion::{Completer, Pair};
 
 pub struct CommandCompleter {
-    corpus: PrefixTree,
+    knowledge_base: PrefixTree,
 }
 
 impl CommandCompleter {
-    pub fn new() -> CommandCompleter {
-        let corpus = PrefixTree::new();
-        CommandCompleter { corpus }
+    pub fn new(commands: &[&str]) -> CommandCompleter {
+        let mut knowledge_base = PrefixTree::new();
+        for item in commands {
+            match knowledge_base.add(*item) {
+                Ok(_) => {}
+                Err(msg) => panic!("{}", msg),
+            }
+        }
+        CommandCompleter { knowledge_base }
+    }
+
+    pub fn add_commands(&mut self, commands: &[&str]) -> Result<(), &'static str> {
+        for command in commands {
+            self.knowledge_base.add(command)?;
+        }
+        Ok(())
     }
 }
 
@@ -28,13 +41,25 @@ impl Completer for CommandCompleter {
         pos: usize,
         _ctx: &Context<'_>,
     ) -> rustyline::Result<(usize, Vec<Pair>)> {
-        Ok((
-            pos,
-            vec![Pair {
-                display: String::new(),
-                replacement: String::from("yoyoyo"),
-            }],
-        ))
+        match self.knowledge_base.starts_with(line) {
+            Some(results) => Ok((
+                pos,
+                results
+                    .iter()
+                    .map(|result| Pair {
+                        display: String::new(),
+                        replacement: String::from(&result[pos..]),
+                    })
+                    .collect(),
+            )),
+            None => Ok((
+                pos,
+                vec![Pair {
+                    display: String::new(),
+                    replacement: String::new(),
+                }],
+            )),
+        }
     }
 }
 
@@ -57,9 +82,9 @@ impl PrefixTree {
         }
     }
 
-    fn add(&mut self, items: &[u8]) -> Result<(), &'static str> {
+    fn add(&mut self, items: &str) -> Result<(), &'static str> {
         let mut children = &mut self.root_children;
-        let mut item_iter = items.into_iter().peekable();
+        let mut item_iter = items.as_bytes().iter().peekable();
         while let Some(item) = item_iter.next() {
             let item_is_last = item_iter.peek().is_none();
 
@@ -88,19 +113,19 @@ impl PrefixTree {
         Ok(())
     }
 
-    fn starts_with(&self, byte_slice: &[u8]) -> Option<Vec<Vec<u8>>> {
-        let mut results: Vec<Vec<u8>> = Vec::new();
+    fn starts_with(&self, input: &str) -> Option<Vec<String>> {
+        let mut results: Vec<String> = Vec::new();
         let mut children = &self.root_children;
+        let input_bytes = input.as_bytes();
+        let mut running_prefix: Vec<u8> = Vec::with_capacity(input_bytes.len());
 
-        let mut running_prefix: Vec<u8> = Vec::with_capacity(byte_slice.len());
-
-        for byte in byte_slice {
+        for byte in input_bytes {
             let matching_child = children.iter().find(|child| child.data == *byte);
             if let Some(matching_node) = matching_child {
                 running_prefix.push(*byte);
                 children = &matching_node.children;
-                if byte_slice.len() == running_prefix.len() && matching_node.is_end {
-                    results.push(running_prefix.clone());
+                if input_bytes.len() == running_prefix.len() && matching_node.is_end {
+                    results.push(String::from_utf8_lossy(&running_prefix).to_string());
                 }
             } else {
                 return None;
@@ -117,7 +142,7 @@ impl PrefixTree {
             if let Some((node, mut path_to_node)) = search_stack.pop() {
                 path_to_node.push(node.data);
                 if node.is_end {
-                    results.push(path_to_node.clone());
+                    results.push(String::from_utf8_lossy(&path_to_node).to_string());
                 }
                 for child in node.children {
                     search_stack.push((child, path_to_node.clone()));
@@ -135,44 +160,42 @@ impl PrefixTree {
 
 #[cfg(test)]
 mod test {
-    use crate::command::completer::PrefixTree;
+    use crate::command::{BUILTIN_COMMAND_NAMES, completer::PrefixTree};
 
     #[test]
     fn prefix_tree_constructed_correctly() {
         let mut pt = PrefixTree::new();
-        let first_str = "Hello";
-        let second_str = "Halo";
-        let third_str = "Ham";
+        let first_str = String::from("Hello");
+        let second_str = String::from("Halo");
+        let third_str = String::from("Ham");
 
-        let _ = pt.add(first_str.as_bytes());
-        let _ = pt.add(second_str.as_bytes());
-        let _ = pt.add(third_str.as_bytes());
+        let _ = pt.add(&first_str);
+        let _ = pt.add(&second_str);
+        let _ = pt.add(&third_str);
 
-        dbg!(third_str, third_str.as_bytes());
         dbg!(&pt);
     }
 
     #[test]
     fn prefix_tree_starts_with_works_correctly() {
         let mut pt = PrefixTree::new();
-        let first_str = "Hello";
-        let second_str = "Halo";
-        let third_str = "Ham";
-        let another_str = "Helium";
 
-        let _ = pt.add(first_str.as_bytes());
-        let _ = pt.add(second_str.as_bytes());
-        let _ = pt.add(third_str.as_bytes());
-        let _ = pt.add(another_str.as_bytes());
+        for command in BUILTIN_COMMAND_NAMES {
+            let _ = pt.add(command);
+        }
 
-        dbg!(third_str, third_str.as_bytes());
-        dbg!(&pt);
+        let test_input = String::from("e");
+        if let Some(results) = pt.starts_with(&test_input) {
+            dbg!(results);
+        }
 
-        if let Some(results) = pt.starts_with("H".as_bytes()) {
-            let results: Vec<String> = results
-                .into_iter()
-                .map(|bytes| String::from_utf8(bytes).unwrap())
-                .collect();
+        let test_input = String::from("c");
+        if let Some(results) = pt.starts_with(&test_input) {
+            dbg!(results);
+        }
+
+        let test_input = String::from("cd");
+        if let Some(results) = pt.starts_with(&test_input) {
             dbg!(results);
         }
     }
