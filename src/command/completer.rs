@@ -48,7 +48,7 @@ impl Completer for CommandCompleter {
                     .iter()
                     .map(|result| Pair {
                         display: String::new(),
-                        replacement: String::from(&result[pos..]),
+                        replacement: String::from(&result[pos..]) + " ",
                     })
                     .collect(),
             )),
@@ -56,7 +56,7 @@ impl Completer for CommandCompleter {
                 pos,
                 vec![Pair {
                     display: String::new(),
-                    replacement: String::new(),
+                    replacement: String::from("\x07"),
                 }],
             )),
         }
