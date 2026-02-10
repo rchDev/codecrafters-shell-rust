@@ -42,16 +42,19 @@ impl Completer for CommandCompleter {
         _ctx: &Context<'_>,
     ) -> rustyline::Result<(usize, Vec<Pair>)> {
         match self.knowledge_base.starts_with(line) {
-            Some(results) => Ok((
-                pos,
-                results
-                    .iter()
-                    .map(|result| Pair {
-                        display: String::from(result),
-                        replacement: String::from(&result[pos..]) + " ",
-                    })
-                    .collect(),
-            )),
+            Some(mut results) => {
+                results.sort();
+                Ok((
+                    pos,
+                    results
+                        .iter()
+                        .map(|result| Pair {
+                            display: String::from(result),
+                            replacement: String::from(&result[pos..]) + " ",
+                        })
+                        .collect(),
+                ))
+            }
             None => Ok((
                 pos,
                 vec![Pair {
