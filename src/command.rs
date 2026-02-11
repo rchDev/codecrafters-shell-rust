@@ -13,10 +13,17 @@ use std::{
 use crate::command::meta::MetaSymbolExpander;
 
 pub const BUILTIN_COMMAND_NAMES: &[&str] = &[
-    "exit", "echo", "type", "pwd", "cd", ">", "1>", "2>", ">>", "1>>", "2>>",
+    "exit", "echo", "type", "pwd", "cd", ">", "1>", "2>", ">>", "1>>", "2>>", "|",
 ];
 
-#[derive(Debug)]
+pub enum Arity {
+    Unary,
+    Binary,
+    Ternary,
+    N_Ary,
+}
+
+#[derive(Debug, Clone)]
 pub enum Command {
     Exit,
     Echo(String),
@@ -35,9 +42,12 @@ pub enum Command {
 }
 
 #[derive(Debug, Clone)]
-pub struct RedirectInfo {
-    pub file_path: PathBuf,
-    pub options: OpenOptions,
+pub enum RedirectInfo {
+    File {
+        file_path: PathBuf,
+        options: OpenOptions,
+    },
+    Pipe(Box<Command>),
 }
 
 #[derive(Debug, PartialEq)]
@@ -51,6 +61,7 @@ enum CommandPartial {
     StdOutRedirectAppend,
     StdErrRedirect,
     StdErrRedirectAppend,
+    Pipe,
     Unknown(String),
 }
 
@@ -61,6 +72,7 @@ impl CommandPartial {
             ">>" | "1>>" => Self::StdOutRedirectAppend,
             "2>" => Self::StdErrRedirect,
             "2>>" => Self::StdErrRedirectAppend,
+            "|" => Self::Pipe,
             "exit" => Self::Exit,
             "echo" => Self::Echo,
             "type" => Self::Type,
@@ -76,7 +88,8 @@ impl CommandPartial {
                 Self::StdErrRedirect
                 | Self::StdOutRedirect
                 | Self::StdOutRedirectAppend
-                | Self::StdErrRedirectAppend => true,
+                | Self::StdErrRedirectAppend
+                | Self::Pipe => true,
                 _ => false,
             },
         }
@@ -97,7 +110,7 @@ impl CommandPartial {
                 options.create(true).write(true).truncate(true);
 
                 Command::EnviromentalModifier {
-                    stdout_redirect: Some(RedirectInfo {
+                    stdout_redirect: Some(RedirectInfo::File {
                         file_path: PathBuf::from(args.join("")),
                         options,
                     }),
@@ -110,7 +123,7 @@ impl CommandPartial {
 
                 Command::EnviromentalModifier {
                     stdout_redirect: None,
-                    stderr_redirect: Some(RedirectInfo {
+                    stderr_redirect: Some(RedirectInfo::File {
                         file_path: PathBuf::from(args.join("")),
                         options,
                     }),
@@ -121,7 +134,7 @@ impl CommandPartial {
                 options.create(true).append(true);
 
                 Command::EnviromentalModifier {
-                    stdout_redirect: Some(RedirectInfo {
+                    stdout_redirect: Some(RedirectInfo::File {
                         file_path: PathBuf::from(args.join("")),
                         options,
                     }),
@@ -134,10 +147,24 @@ impl CommandPartial {
 
                 Command::EnviromentalModifier {
                     stdout_redirect: None,
-                    stderr_redirect: Some(RedirectInfo {
+                    stderr_redirect: Some(RedirectInfo::File {
                         file_path: PathBuf::from(args.join("")),
                         options,
                     }),
+                }
+            }
+            Self::Pipe => {
+                let restored_args = args.join(" ");
+                let command_result = Command::parse(&restored_args, external_commands);
+                let first_command = command_result
+                    .commands
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| Command::None(restored_args));
+
+                Command::EnviromentalModifier {
+                    stdout_redirect: Some(RedirectInfo::Pipe(Box::new(first_command))),
+                    stderr_redirect: None,
                 }
             }
             Self::Type => {
