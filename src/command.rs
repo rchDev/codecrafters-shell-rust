@@ -16,11 +16,23 @@ pub const BUILTIN_COMMAND_NAMES: &[&str] = &[
     "exit", "echo", "type", "pwd", "cd", ">", "1>", "2>", ">>", "1>>", "2>>", "|",
 ];
 
-pub enum Arity {
-    Unary,
-    Binary,
-    Ternary,
-    N_Ary,
+#[derive(Debug, Clone)]
+pub enum StdOutRedirect {
+    File {
+        file_path: PathBuf,
+        options: OpenOptions,
+    },
+    Pipe,
+    None,
+}
+
+#[derive(Debug, Clone)]
+pub enum StdErrRedirect {
+    File {
+        file_path: PathBuf,
+        options: OpenOptions,
+    },
+    None,
 }
 
 #[derive(Debug, Clone)]
@@ -30,10 +42,6 @@ pub enum Command {
     Type(Vec<Command>),
     Pwd,
     Cd(PathBuf),
-    EnviromentalModifier {
-        stdout_redirect: Option<RedirectInfo>,
-        stderr_redirect: Option<RedirectInfo>,
-    },
     External {
         exec_path: PathBuf,
         args: Vec<String>,
@@ -41,17 +49,8 @@ pub enum Command {
     None(String),
 }
 
-#[derive(Debug, Clone)]
-pub enum RedirectInfo {
-    File {
-        file_path: PathBuf,
-        options: OpenOptions,
-    },
-    Pipe(Box<Command>),
-}
-
 #[derive(Debug, PartialEq)]
-enum CommandPartial {
+enum PartialToken {
     Exit,
     Echo,
     Type,
@@ -65,8 +64,14 @@ enum CommandPartial {
     Unknown(String),
 }
 
-impl CommandPartial {
-    fn parse(input: &str) -> CommandPartial {
+enum FinalToken {
+    Command(Command),
+    StdOutRedirect(StdOutRedirect),
+    StdErrRedirect(StdErrRedirect),
+}
+
+impl PartialToken {
+    fn parse(input: &str) -> PartialToken {
         match input {
             ">" | "1>" => Self::StdOutRedirect,
             ">>" | "1>>" => Self::StdOutRedirectAppend,
@@ -82,8 +87,9 @@ impl CommandPartial {
         }
     }
 
-    fn can_be_chained_after(&self, other: &CommandPartial) -> bool {
+    fn can_be_chained_after(&self, other: &PartialToken) -> bool {
         match other {
+            Self::Pipe => true,
             _ => match self {
                 Self::StdErrRedirect
                 | Self::StdOutRedirect
@@ -95,94 +101,66 @@ impl CommandPartial {
         }
     }
 
-    fn into_full(
+    fn into_final(
         &self,
         args: &Vec<String>,
         external_commands: &HashMap<OsString, PathBuf>,
-    ) -> Command {
+    ) -> FinalToken {
         match self {
-            Self::Exit => Command::Exit,
-            Self::Echo => Command::Echo(args.join(" ")),
-            Self::Pwd => Command::Pwd,
-            Self::Cd => Command::Cd(PathBuf::from(args.join(""))),
+            Self::Exit => FinalToken::Command(Command::Exit),
+            Self::Echo => FinalToken::Command(Command::Echo(args.join(" "))),
+            Self::Pwd => FinalToken::Command(Command::Pwd),
+            Self::Cd => FinalToken::Command(Command::Cd(PathBuf::from(args.join("")))),
             Self::StdOutRedirect => {
                 let mut options = OpenOptions::new();
                 options.create(true).write(true).truncate(true);
-
-                Command::EnviromentalModifier {
-                    stdout_redirect: Some(RedirectInfo::File {
-                        file_path: PathBuf::from(args.join("")),
-                        options,
-                    }),
-                    stderr_redirect: None,
-                }
+                FinalToken::StdOutRedirect(StdOutRedirect::File {
+                    file_path: PathBuf::from(args.join("")),
+                    options,
+                })
             }
             Self::StdErrRedirect => {
                 let mut options = OpenOptions::new();
                 options.create(true).write(true).truncate(true);
-
-                Command::EnviromentalModifier {
-                    stdout_redirect: None,
-                    stderr_redirect: Some(RedirectInfo::File {
-                        file_path: PathBuf::from(args.join("")),
-                        options,
-                    }),
-                }
+                FinalToken::StdErrRedirect(StdErrRedirect::File {
+                    file_path: PathBuf::from(args.join("")),
+                    options,
+                })
             }
             Self::StdOutRedirectAppend => {
                 let mut options = OpenOptions::new();
                 options.create(true).append(true);
-
-                Command::EnviromentalModifier {
-                    stdout_redirect: Some(RedirectInfo::File {
-                        file_path: PathBuf::from(args.join("")),
-                        options,
-                    }),
-                    stderr_redirect: None,
-                }
+                FinalToken::StdOutRedirect(StdOutRedirect::File {
+                    file_path: PathBuf::from(args.join("")),
+                    options,
+                })
             }
             Self::StdErrRedirectAppend => {
                 let mut options = OpenOptions::new();
                 options.create(true).append(true);
 
-                Command::EnviromentalModifier {
-                    stdout_redirect: None,
-                    stderr_redirect: Some(RedirectInfo::File {
-                        file_path: PathBuf::from(args.join("")),
-                        options,
-                    }),
-                }
+                FinalToken::StdErrRedirect(StdErrRedirect::File {
+                    file_path: PathBuf::from(args.join("")),
+                    options,
+                })
             }
-            Self::Pipe => {
-                let restored_args = args.join(" ");
-                let command_result = Command::parse(&restored_args, external_commands);
-                let first_command = command_result
-                    .commands
-                    .first()
-                    .cloned()
-                    .unwrap_or_else(|| Command::None(restored_args));
-
-                Command::EnviromentalModifier {
-                    stdout_redirect: Some(RedirectInfo::Pipe(Box::new(first_command))),
-                    stderr_redirect: None,
-                }
-            }
+            Self::Pipe => FinalToken::StdOutRedirect(StdOutRedirect::Pipe),
             Self::Type => {
                 let inner_commands: Vec<Command> = args
                     .iter()
                     .flat_map(|arg| Command::parse(arg, external_commands).commands)
                     .collect();
-                Command::Type(inner_commands)
+                FinalToken::Command(Command::Type(inner_commands))
             }
             Self::Unknown(value) => {
                 let exec_path = external_commands.get(&OsString::from(value));
                 if let Some(path) = exec_path {
-                    Command::External {
+                    FinalToken::Command(Command::External {
                         exec_path: path.clone(),
                         args: args.iter().map(|arg| String::from(arg)).collect(),
-                    }
+                    })
                 } else {
-                    Command::None(value.clone())
+                    FinalToken::Command(Command::None(value.clone()))
                 }
             }
         }
@@ -197,66 +175,39 @@ impl Command {
         let trimmed_input = input.trim();
         let tokens_iter = MetaSymbolExpander::new(trimmed_input.chars());
 
-        let mut commands: Vec<Command> = Vec::with_capacity(10);
+        const INITIAL_CAPACITY: usize = 10;
+        let mut commands = Vec::with_capacity(INITIAL_CAPACITY);
+        let mut stdout_redirects = Vec::with_capacity(INITIAL_CAPACITY);
+        let mut stderr_redirects = Vec::with_capacity(INITIAL_CAPACITY);
 
-        let (mut current_partial, mut current_args) = (None::<CommandPartial>, Vec::new());
-
-        let mut last_env_mod_index = 0;
-
-        commands.push(Command::EnviromentalModifier {
-            stderr_redirect: None,
-            stdout_redirect: None,
-        });
+        let (mut current_partial, mut current_args) = (None::<PartialToken>, Vec::new());
 
         for token in tokens_iter {
             if current_partial.is_none() {
-                current_partial = Some(CommandPartial::parse(&token));
+                current_partial = Some(PartialToken::parse(&token));
                 continue;
             }
 
-            let new_partial_cmd = CommandPartial::parse(&token);
+            let new_partial_cmd = PartialToken::parse(&token);
             if new_partial_cmd.can_be_chained_after(current_partial.as_ref().unwrap()) {
-                match current_partial.as_ref().unwrap() {
-                    curr_partial @ CommandPartial::StdOutRedirect
-                    | curr_partial @ CommandPartial::StdErrRedirect
-                    | curr_partial @ CommandPartial::StdOutRedirectAppend
-                    | curr_partial @ CommandPartial::StdErrRedirectAppend => {
-                        if let Some(Command::EnviromentalModifier {
-                            stdout_redirect,
-                            stderr_redirect,
-                        }) = commands.get_mut(last_env_mod_index)
-                        {
-                            let new_env_mod_cmd =
-                                curr_partial.into_full(&current_args, external_commands);
-                            if let Command::EnviromentalModifier {
-                                stdout_redirect: new_stdout_redirect,
-                                stderr_redirect: new_stderr_redirect,
-                            } = new_env_mod_cmd
-                            {
-                                if new_stdout_redirect.is_some() {
-                                    *stdout_redirect = new_stdout_redirect;
-                                }
-                                if new_stderr_redirect.is_some() {
-                                    *stderr_redirect = new_stderr_redirect;
-                                }
-                            }
-                        } else {
-                            unreachable!(
-                                "last_env_mod_index should point to Command::EnvironmentalModifier"
-                            );
-                        }
-                        commands.push(Command::EnviromentalModifier {
-                            stdout_redirect: None,
-                            stderr_redirect: None,
-                        });
-                        last_env_mod_index = commands.len() - 1;
+                let final_token = current_partial
+                    .unwrap()
+                    .into_final(&current_args, external_commands);
+                match final_token {
+                    FinalToken::Command(cmd) => {
+                        commands.push(cmd);
+                        stdout_redirects.push(StdOutRedirect::None);
+                        stderr_redirects.push(StdErrRedirect::None);
                     }
-                    _ => {
-                        commands.push(
-                            current_partial
-                                .unwrap()
-                                .into_full(&current_args, external_commands),
-                        );
+                    FinalToken::StdOutRedirect(redirect) => {
+                        if let Some(last_redirect) = stdout_redirects.last_mut() {
+                            *last_redirect = redirect;
+                        }
+                    }
+                    FinalToken::StdErrRedirect(redirect) => {
+                        if let Some(last_redirect) = stderr_redirects.last_mut() {
+                            *last_redirect = redirect;
+                        }
                     }
                 }
                 current_partial = Some(new_partial_cmd);
@@ -267,42 +218,30 @@ impl Command {
         }
 
         if let Some(partial_cmd) = current_partial {
-            match partial_cmd {
-                CommandPartial::StdErrRedirect
-                | CommandPartial::StdOutRedirect
-                | CommandPartial::StdErrRedirectAppend
-                | CommandPartial::StdOutRedirectAppend => {
-                    if let Some(Command::EnviromentalModifier {
-                        stdout_redirect,
-                        stderr_redirect,
-                    }) = commands.get_mut(last_env_mod_index)
-                    {
-                        if let Command::EnviromentalModifier {
-                            stdout_redirect: new_stdout_redirect,
-                            stderr_redirect: new_stderr_redirect,
-                        } = partial_cmd.into_full(&current_args, external_commands)
-                        {
-                            if new_stdout_redirect.is_some() {
-                                *stdout_redirect = new_stdout_redirect;
-                            }
-                            if new_stderr_redirect.is_some() {
-                                *stderr_redirect = new_stderr_redirect;
-                            }
-                        }
-                    } else {
-                        unreachable!(
-                            "last_env_mod_index should point to Command::EnvironmentalModifier"
-                        );
+            let final_token = partial_cmd.into_final(&current_args, external_commands);
+            match final_token {
+                FinalToken::Command(cmd) => {
+                    commands.push(cmd);
+                    stdout_redirects.push(StdOutRedirect::None);
+                    stderr_redirects.push(StdErrRedirect::None);
+                }
+                FinalToken::StdOutRedirect(redirect) => {
+                    if let Some(last_redirect) = stdout_redirects.last_mut() {
+                        *last_redirect = redirect;
                     }
                 }
-                _ => {
-                    commands.push(partial_cmd.into_full(&current_args, external_commands));
+                FinalToken::StdErrRedirect(redirect) => {
+                    if let Some(last_redirect) = stderr_redirects.last_mut() {
+                        *last_redirect = redirect;
+                    }
                 }
             }
         }
 
         CommandResult {
             input: trimmed_input,
+            stdout_redirects,
+            stderr_redirects,
             commands,
         }
     }
@@ -316,9 +255,6 @@ impl fmt::Display for Command {
             Command::Echo(_) => write!(f, "echo"),
             Command::Cd(_) => write!(f, "cd"),
             Command::Type(_) => write!(f, "type"),
-            Command::EnviromentalModifier { .. } => {
-                write!(f, "")
-            }
             Command::External { exec_path, .. } => {
                 write!(
                     f,
@@ -372,6 +308,8 @@ pub fn get_external_commands(path: OsString) -> HashMap<OsString, PathBuf> {
 pub struct CommandResult<'a> {
     input: &'a str,
     pub commands: Vec<Command>,
+    pub stdout_redirects: Vec<StdOutRedirect>,
+    pub stderr_redirects: Vec<StdErrRedirect>,
 }
 
 #[cfg(test)]
