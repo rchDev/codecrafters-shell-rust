@@ -1,7 +1,7 @@
 pub use crate::command::Command;
 pub use crate::command::completer::CommandCompleter;
 
-use crate::command::{CommandResult, StdErrRedirect, StdOutRedirect};
+use crate::command::{CommandResult, HistoryParam, StdErrRedirect, StdOutRedirect};
 
 use rustyline::history::History;
 use std::{
@@ -152,7 +152,7 @@ impl Shell {
     pub fn apply_commands(
         &mut self,
         command_result: Result<CommandResult, io::Error>,
-        history: &CommandHistory,
+        history: &mut CommandHistory,
     ) {
         let command_result = match command_result {
             Ok(result) => result,
@@ -306,8 +306,9 @@ impl Shell {
     fn exec_builtin_command(
         &mut self,
         command: &Command,
-        history: &CommandHistory,
+        history: &mut CommandHistory,
     ) -> Result<String, String> {
+        const AVG_COMMAND_SIZE: usize = 20;
         match command {
             Command::External { .. } => {
                 unreachable!("EXETERNAL COMMAND REACH THE CODE PART IT SHOULDN'T HAVE REACHED");
@@ -322,27 +323,40 @@ impl Shell {
                     exec_path.display()
                 )),
             },
-            Command::History(limit) => {
-                const AVG_COMMAND_SIZE: usize = 20;
-                let history_len = history.previous_user_input.len();
-                let elems_to_take = if let Some(count) = *limit {
-                    count
-                } else {
-                    history_len
-                };
-
-                let mut result = String::with_capacity(elems_to_take * AVG_COMMAND_SIZE);
-                let elem_limit = history_len.saturating_sub(elems_to_take);
-                for (i, input) in history
-                    .previous_user_input
-                    .iter()
-                    .enumerate()
-                    .skip(elem_limit)
-                {
-                    result += &format!("    {}  {input}\n", i + 1);
+            Command::History(arg) => match arg {
+                HistoryParam::None => {
+                    let mut result = String::with_capacity(history.len() * AVG_COMMAND_SIZE);
+                    for (i, input) in history.previous_user_input.iter().enumerate() {
+                        result += &format!("    {}  {input}\n", i + 1);
+                    }
+                    Ok(result)
                 }
-                Ok(result)
-            }
+                HistoryParam::Limit(count) => {
+                    const AVG_COMMAND_SIZE: usize = 20;
+                    let history_len = history.previous_user_input.len();
+                    let elems_to_take = if let Some(count) = *count {
+                        count
+                    } else {
+                        history_len
+                    };
+
+                    let mut result = String::with_capacity(elems_to_take * AVG_COMMAND_SIZE);
+                    let elem_limit = history_len.saturating_sub(elems_to_take);
+                    for (i, input) in history
+                        .previous_user_input
+                        .iter()
+                        .enumerate()
+                        .skip(elem_limit)
+                    {
+                        result += &format!("    {}  {input}\n", i + 1);
+                    }
+                    Ok(result)
+                }
+                HistoryParam::ReadFromFile(file_path) => {
+                    let _ = history.load(file_path.as_path());
+                    Ok("".to_string())
+                }
+            },
             Command::Echo(msg) => Ok(format!("{msg}\n")),
             Command::Type(inner_commands) => {
                 let mut result = String::with_capacity(256);

@@ -43,12 +43,19 @@ pub enum Command {
     Type(Vec<Command>),
     Pwd,
     Cd(PathBuf),
-    History(Option<usize>),
+    History(HistoryParam),
     External {
         exec_path: PathBuf,
         args: Vec<String>,
     },
     None(String),
+}
+
+#[derive(Debug, Clone)]
+pub enum HistoryParam {
+    None,
+    Limit(Option<usize>),
+    ReadFromFile(PathBuf),
 }
 
 #[derive(Debug, PartialEq)]
@@ -116,8 +123,20 @@ impl PartialToken {
             Self::Pwd => FinalToken::Command(Command::Pwd),
             Self::Cd => FinalToken::Command(Command::Cd(PathBuf::from(args.join("")))),
             Self::History => {
-                let count = args.first().and_then(|str| str.parse::<usize>().ok());
-                FinalToken::Command(Command::History(count))
+                let mut args_iter = args.iter();
+                let (first, second) = (args_iter.next(), args_iter.next());
+                match (first, second) {
+                    (None, None) | (None, Some(_)) => {
+                        FinalToken::Command(Command::History(HistoryParam::None))
+                    }
+                    (Some(count), None) => {
+                        let count = count.parse::<usize>().ok();
+                        FinalToken::Command(Command::History(HistoryParam::Limit(count)))
+                    }
+                    (Some(_), Some(file_path)) => FinalToken::Command(Command::History(
+                        HistoryParam::ReadFromFile(PathBuf::from(file_path)),
+                    )),
+                }
             }
             Self::StdOutRedirect => {
                 let mut options = OpenOptions::new();
@@ -280,9 +299,15 @@ impl fmt::Display for Command {
             Command::Echo(_) => write!(f, "echo"),
             Command::Cd(_) => write!(f, "cd"),
             Command::Type(_) => write!(f, "type"),
-            Command::History(count) => match count {
-                Some(val) => write!(f, "history {val}"),
-                None => write!(f, "history"),
+            Command::History(arg) => match arg {
+                HistoryParam::Limit(count) => match count {
+                    Some(limit) => write!(f, "history {limit}"),
+                    None => write!(f, "history"),
+                },
+                HistoryParam::None => write!(f, "history"),
+                HistoryParam::ReadFromFile(file_path) => {
+                    write!(f, "history -r {}", file_path.display())
+                }
             },
             Command::External { exec_path, .. } => {
                 write!(

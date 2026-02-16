@@ -37,7 +37,7 @@ fn main() -> Result<()> {
         match readline {
             Ok(line) => {
                 let command_result = Command::parse(&line, &external_commands);
-                shell.apply_commands(command_result, rl.history());
+                shell.apply_commands(command_result, rl.history_mut());
             }
             Err(ReadlineError::Interrupted) => {
                 println!("CTRL-C");
