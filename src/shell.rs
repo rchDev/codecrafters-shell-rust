@@ -137,13 +137,13 @@ impl Shell {
                             }
                             StdOutRedirect::None => {
                                 if !builtin_result.is_empty() {
-                                    let _ = writeln!(io::stdout(), "{}", builtin_result);
+                                    let _ = write!(io::stdout(), "{}", builtin_result);
                                 }
                             }
                             StdOutRedirect::File { .. } => match out_handle {
                                 Some(mut handle) => {
                                     if !builtin_result.is_empty() {
-                                        let _ = writeln!(handle, "{}", builtin_result);
+                                        let _ = write!(handle, "{}", builtin_result);
                                     }
                                 }
                                 None => {
@@ -161,7 +161,7 @@ impl Shell {
                             StdErrRedirect::File { .. } => match err_handle {
                                 Some(mut handle) => {
                                     if !error.is_empty() {
-                                        let _ = write!(handle, "{}\n", error);
+                                        let _ = write!(handle, "{}", error);
                                     }
                                 }
                                 None => {
@@ -176,7 +176,7 @@ impl Shell {
                             },
                             StdErrRedirect::None => {
                                 if !error.is_empty() {
-                                    let _ = writeln!(io::stderr(), "{}", error);
+                                    let _ = write!(io::stderr(), "{}", error);
                                 }
                             }
                         },
@@ -189,7 +189,7 @@ impl Shell {
             match child.wait() {
                 Ok(_) => {}
                 Err(err) => {
-                    let _ = writeln!(io::stderr(), "{}", err.to_string());
+                    let _ = write!(io::stderr(), "{}", err.to_string());
                 }
             };
         }
@@ -206,39 +206,36 @@ impl Shell {
                     Ok(String::new())
                 }
                 Err(_) => Err(format!(
-                    "cd: {}: No such file or directory",
+                    "cd: {}: No such file or directory\n",
                     exec_path.display()
                 )),
             },
-            Command::Echo(msg) => Ok(format!("{msg}")),
+            Command::Echo(msg) => Ok(format!("{msg}\n")),
             Command::Type(inner_commands) => {
                 let mut result = String::with_capacity(256);
                 for (index, command) in inner_commands.iter().enumerate() {
-                    if index > 0 {
-                        result += "\n";
-                    }
                     match command {
                         Command::None(name) => {
-                            result += &format!("{name}: not found");
+                            result += &format!("{name}: not found\n");
                         }
                         Command::External { exec_path, args: _ } => {
                             let res = format!(
-                                "{} is {}",
+                                "{} is {}\n",
                                 exec_path.file_name().unwrap_or_default().display(),
                                 exec_path.display()
                             );
                             result += &res;
                         }
-                        builtin => result += &format!("{builtin} is a shell builtin"),
+                        builtin => result += &format!("{builtin} is a shell builtin\n"),
                     }
                 }
                 return Ok(result);
             }
-            Command::Pwd => Ok(format!("{}", self.working_dir.display())),
+            Command::Pwd => Ok(format!("{}\n", self.working_dir.display())),
             Command::Exit => {
                 process::exit(0);
             }
-            Command::None(cmd_name) => Err(format!("{cmd_name}: command not found")),
+            Command::None(cmd_name) => Err(format!("{cmd_name}: command not found\n")),
         }
     }
 
