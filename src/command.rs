@@ -284,6 +284,10 @@ pub fn get_external_commands(path: OsString) -> HashMap<OsString, PathBuf> {
                 Err(_) => continue,
             };
 
+            // if entry.file_name().eq_ignore_ascii_case("cat") {
+            //     println!("{:?}", &dir);
+            //     println!("\t{:?}", &entry);
+            // }
             let metadata = match entry.metadata() {
                 Ok(meta) => meta,
                 Err(_) => continue,
@@ -297,7 +301,14 @@ pub fn get_external_commands(path: OsString) -> HashMap<OsString, PathBuf> {
 
                     // Any execute bit set (user, group, or other)
                     if mode & 0o111 != 0 {
-                        executables.insert(entry.file_name(), entry.path());
+                        let dir_entry_path = entry.path();
+                        if dir_entry_path.exists() {
+                            let resolved_path =
+                                fs::canonicalize(&dir_entry_path).unwrap_or(entry.path());
+                            executables
+                                .entry(entry.file_name())
+                                .or_insert(resolved_path);
+                        }
                     }
                 }
             }
