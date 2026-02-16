@@ -7,8 +7,8 @@ use rustyline::history::History;
 use std::{
     borrow::Cow,
     env,
-    fs::File,
-    io::{self, Cursor, Read, Write},
+    fs::{File, OpenOptions},
+    io::{self, BufRead, BufReader, Cursor, Read, Write},
     path::PathBuf,
     process::{self, Child, Command as StdProcCmd, Stdio},
 };
@@ -74,7 +74,16 @@ impl History for CommandHistory {
     fn len(&self) -> usize {
         self.previous_user_input.len()
     }
-    fn load(&mut self, _path: &std::path::Path) -> rustyline::Result<()> {
+    fn load(&mut self, path: &std::path::Path) -> rustyline::Result<()> {
+        let file_handle = OpenOptions::new().read(true).open(path)?;
+
+        let reader = BufReader::new(file_handle);
+        for line in reader.lines().filter_map(|line| line.ok()) {
+            if !line.is_empty() {
+                self.add_owned(line)?;
+            }
+        }
+
         rustyline::Result::Ok(())
     }
     fn save(&mut self, _path: &std::path::Path) -> rustyline::Result<()> {
