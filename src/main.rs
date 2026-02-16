@@ -1,7 +1,6 @@
 use codecrafters_shell::command::{self, BUILTIN_COMMAND_NAMES};
-use codecrafters_shell::shell::{Command, CommandCompleter, Shell};
+use codecrafters_shell::shell::{Command, CommandCompleter, CommandHistory, Shell};
 use rustyline::error::ReadlineError;
-use rustyline::history::DefaultHistory;
 use rustyline::{CompletionType, Config, Editor, Result};
 
 #[allow(unused_imports)]
@@ -20,10 +19,15 @@ fn main() -> Result<()> {
     if let Err(msg) = autocompleter.add_commands(BUILTIN_COMMAND_NAMES) {
         panic!("{}", msg);
     }
+
     let config = Config::builder()
-        .completion_type(CompletionType::List) // or CompletionType::List
+        .completion_type(CompletionType::List)
+        .auto_add_history(true)
         .build();
-    let mut rl: Editor<CommandCompleter, DefaultHistory> = Editor::with_config(config)?;
+
+    let mut rl: Editor<CommandCompleter, CommandHistory> =
+        Editor::with_history(config, CommandHistory::new())?;
+
     rl.set_helper(Some(autocompleter));
 
     let mut shell = Shell::new();
@@ -33,7 +37,7 @@ fn main() -> Result<()> {
         match readline {
             Ok(line) => {
                 let command_result = Command::parse(&line, &external_commands);
-                shell.apply_commands(command_result);
+                shell.apply_commands(command_result, rl.history());
             }
             Err(ReadlineError::Interrupted) => {
                 println!("CTRL-C");

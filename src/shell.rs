@@ -3,8 +3,9 @@ pub use crate::command::completer::CommandCompleter;
 
 use crate::command::{CommandResult, StdErrRedirect, StdOutRedirect};
 
+use rustyline::history::History;
 use std::{
-    collections::HashMap,
+    borrow::Cow,
     env,
     fs::File,
     io::{self, Cursor, Read, Write},
@@ -13,22 +14,95 @@ use std::{
 };
 
 pub struct CommandHistory {
+    index: usize,
     previous_user_input: Vec<String>,
-    input_to_command_tokens: HashMap<String, Vec<String>>,
 }
 
 impl CommandHistory {
-    fn new(history_size: usize) -> CommandHistory {
+    pub fn new() -> CommandHistory {
         CommandHistory {
-            previous_user_input: Vec::with_capacity(history_size),
-            input_to_command_tokens: HashMap::with_capacity(history_size),
+            index: 0,
+            previous_user_input: Vec::with_capacity(SHELL_DEFAULT_HISTORY_SIZE),
         }
+    }
+}
+
+impl History for CommandHistory {
+    fn add(&mut self, line: &str) -> rustyline::Result<bool> {
+        self.previous_user_input.push(line.to_string());
+        rustyline::Result::Ok(true)
+    }
+    fn add_owned(&mut self, line: String) -> rustyline::Result<bool> {
+        self.previous_user_input.push(line);
+        rustyline::Result::Ok(true)
+    }
+    fn append(&mut self, _path: &std::path::Path) -> rustyline::Result<()> {
+        rustyline::Result::Ok(())
+    }
+    fn clear(&mut self) -> rustyline::Result<()> {
+        self.previous_user_input.clear();
+        self.index = 0;
+        rustyline::Result::Ok(())
+    }
+    fn get(
+        &self,
+        index: usize,
+        _dir: rustyline::history::SearchDirection,
+    ) -> rustyline::Result<Option<rustyline::history::SearchResult<'_>>> {
+        let Some(entry) = self.previous_user_input.get(index) else {
+            return rustyline::Result::Ok(None);
+        };
+
+        let search_result = rustyline::history::SearchResult {
+            idx: index,
+            pos: 0,
+            entry: Cow::Borrowed(entry),
+        };
+
+        rustyline::Result::Ok(Some(search_result))
+    }
+
+    fn ignore_dups(&mut self, _yes: bool) -> rustyline::Result<()> {
+        rustyline::Result::Ok(())
+    }
+
+    fn ignore_space(&mut self, _yes: bool) {}
+
+    fn is_empty(&self) -> bool {
+        self.previous_user_input.is_empty()
+    }
+    fn len(&self) -> usize {
+        self.previous_user_input.len()
+    }
+    fn load(&mut self, _path: &std::path::Path) -> rustyline::Result<()> {
+        rustyline::Result::Ok(())
+    }
+    fn save(&mut self, _path: &std::path::Path) -> rustyline::Result<()> {
+        rustyline::Result::Ok(())
+    }
+    fn search(
+        &self,
+        _term: &str,
+        _start: usize,
+        _dir: rustyline::history::SearchDirection,
+    ) -> rustyline::Result<Option<rustyline::history::SearchResult<'_>>> {
+        rustyline::Result::Ok(None)
+    }
+    fn set_max_len(&mut self, _len: usize) -> rustyline::Result<()> {
+        unimplemented!()
+    }
+    fn starts_with(
+        &self,
+        _term: &str,
+        _start: usize,
+        _dir: rustyline::history::SearchDirection,
+    ) -> rustyline::Result<Option<rustyline::history::SearchResult<'_>>> {
+        unimplemented!()
     }
 }
 
 pub struct Shell {
     working_dir: PathBuf,
-    history: CommandHistory,
 }
 
 pub const SHELL_DEFAULT_HISTORY_SIZE: usize = 256;
@@ -42,24 +116,11 @@ impl Shell {
     pub fn new() -> Self {
         Self {
             working_dir: env::current_dir().unwrap(),
-            history: CommandHistory::new(SHELL_DEFAULT_HISTORY_SIZE),
         }
     }
 
-    pub fn set_history_size(size: usize) {
+    pub fn set_history_size(_size: usize) {
         unimplemented!();
-    }
-
-    fn add_history_entry(&mut self, cr: &CommandResult) -> Result<(), &'static str> {
-        let input = cr.metadata.input.clone();
-        self.history.previous_user_input.push(input.clone());
-
-        let input_tokens = cr.metadata.command_tokens.clone();
-        self.history
-            .input_to_command_tokens
-            .insert(input.clone(), input_tokens);
-
-        Ok(())
     }
 
     fn open_redirect_files(
@@ -79,19 +140,16 @@ impl Shell {
         (stdout_handle, stderr_handle)
     }
 
-    pub fn apply_commands(&mut self, command_result: Result<CommandResult, io::Error>) {
+    pub fn apply_commands(
+        &mut self,
+        command_result: Result<CommandResult, io::Error>,
+        history: &CommandHistory,
+    ) {
         let command_result = match command_result {
             Ok(result) => result,
             Err(error) => {
                 let _ = writeln!(io::stderr(), "{}", error.to_string());
                 return;
-            }
-        };
-
-        match self.add_history_entry(&command_result) {
-            Ok(()) => {}
-            Err(_) => {
-                panic!("failed to add history entry");
             }
         };
 
@@ -169,7 +227,7 @@ impl Shell {
                     child_process_wait_list.push(child);
                 }
                 builtin_command => {
-                    let execution_result = self.exec_builtin_command(builtin_command);
+                    let execution_result = self.exec_builtin_command(builtin_command, history);
                     prev_out = None;
                     match execution_result {
                         Ok(builtin_result) => match out_redirect {
@@ -236,7 +294,11 @@ impl Shell {
         }
     }
 
-    fn exec_builtin_command(&mut self, command: &Command) -> Result<String, String> {
+    fn exec_builtin_command(
+        &mut self,
+        command: &Command,
+        history: &CommandHistory,
+    ) -> Result<String, String> {
         match command {
             Command::External { .. } => {
                 unreachable!("EXETERNAL COMMAND REACH THE CODE PART IT SHOULDN'T HAVE REACHED");
@@ -253,7 +315,7 @@ impl Shell {
             },
             Command::History(limit) => {
                 const AVG_COMMAND_SIZE: usize = 20;
-                let history_len = self.history.previous_user_input.len();
+                let history_len = history.previous_user_input.len();
                 let elems_to_take = if let Some(count) = *limit {
                     count
                 } else {
@@ -262,8 +324,7 @@ impl Shell {
 
                 let mut result = String::with_capacity(elems_to_take * AVG_COMMAND_SIZE);
                 let elem_limit = history_len.saturating_sub(elems_to_take);
-                for (i, input) in self
-                    .history
+                for (i, input) in history
                     .previous_user_input
                     .iter()
                     .enumerate()
