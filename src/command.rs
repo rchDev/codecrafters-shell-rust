@@ -7,6 +7,7 @@ use std::{
     ffi::OsString,
     fmt::{self},
     fs::{self, OpenOptions},
+    io,
     path::PathBuf,
 };
 
@@ -171,7 +172,7 @@ impl Command {
     pub fn parse<'a>(
         input: &'a str,
         external_commands: &HashMap<OsString, PathBuf>,
-    ) -> CommandResult<'a> {
+    ) -> Result<CommandResult<'a>, io::Error> {
         let trimmed_input = input.trim();
         let tokens_iter = MetaSymbolExpander::new(trimmed_input.chars());
 
@@ -238,12 +239,12 @@ impl Command {
             }
         }
 
-        CommandResult {
+        Ok(CommandResult {
             input: trimmed_input,
             stdout_redirects,
             stderr_redirects,
             commands,
-        }
+        })
     }
 }
 
@@ -307,9 +308,25 @@ pub fn get_external_commands(path: OsString) -> HashMap<OsString, PathBuf> {
 #[derive(Debug)]
 pub struct CommandResult<'a> {
     input: &'a str,
-    pub commands: Vec<Command>,
-    pub stdout_redirects: Vec<StdOutRedirect>,
-    pub stderr_redirects: Vec<StdErrRedirect>,
+    commands: Vec<Command>,
+    stdout_redirects: Vec<StdOutRedirect>,
+    stderr_redirects: Vec<StdErrRedirect>,
+}
+
+impl<'a> CommandResult<'a> {
+    pub fn commands(&self) -> std::slice::Iter<'_, Command> {
+        self.commands.iter()
+    }
+
+    pub fn commands_with_redirects(
+        &self,
+    ) -> impl Iterator<Item = (&Command, &StdOutRedirect, &StdErrRedirect)> {
+        self.commands
+            .iter()
+            .zip(self.stdout_redirects.iter())
+            .zip(self.stderr_redirects.iter())
+            .map(|((cmd, stdout), stderr)| (cmd, stdout, stderr))
+    }
 }
 
 #[cfg(test)]
