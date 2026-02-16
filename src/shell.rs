@@ -4,19 +4,11 @@ pub use crate::command::completer::CommandCompleter;
 use crate::command::{CommandResult, StdErrRedirect, StdOutRedirect};
 
 use std::{
-    cell::RefCell,
     env,
     io::{self, Cursor, Read, Write},
     path::PathBuf,
     process::{self, Child, Command as StdProcCmd, Stdio},
 };
-
-struct ExecutionContext {
-    current_command_index: usize,
-    last_command_index: usize,
-    process_wait_stack: Vec<RefCell<Child>>,
-    prev_out: Option<Box<dyn Read + Send>>,
-}
 
 pub struct Shell {
     working_dir: PathBuf,
@@ -38,7 +30,7 @@ impl Shell {
         let command_result = match command_result {
             Ok(result) => result,
             Err(error) => {
-                writeln!(io::stderr(), "{}", error.to_string());
+                let _ = writeln!(io::stderr(), "{}", error.to_string());
                 return;
             }
         };
@@ -125,15 +117,15 @@ impl Shell {
                                 prev_out = Some(Box::new(Cursor::new(builtin_result)));
                             }
                             StdOutRedirect::None => {
-                                writeln!(io::stdout(), "{}", builtin_result);
+                                let _ = writeln!(io::stdout(), "{}", builtin_result);
                             }
                             StdOutRedirect::File { file_path, options } => {
                                 match options.open(&file_path) {
                                     Ok(mut file_handle) => {
-                                        writeln!(file_handle, "{}", builtin_result);
+                                        let _ = writeln!(file_handle, "{}", builtin_result);
                                     }
                                     Err(_) => {
-                                        writeln!(
+                                        let _ = writeln!(
                                             io::stdout(),
                                             "failed to open file for stdout redirection:\n{}",
                                             builtin_result
@@ -146,10 +138,10 @@ impl Shell {
                             StdErrRedirect::File { file_path, options } => {
                                 match options.open(&file_path) {
                                     Ok(mut file_handle) => {
-                                        writeln!(file_handle, "{}", error);
+                                        let _ = writeln!(file_handle, "{}", error);
                                     }
                                     Err(_) => {
-                                        writeln!(
+                                        let _ = writeln!(
                                             io::stderr(),
                                             "failed to open file for stderr redirection:\n{}",
                                             error
@@ -158,7 +150,7 @@ impl Shell {
                                 }
                             }
                             StdErrRedirect::None => {
-                                writeln!(io::stderr(), "{}", error);
+                                let _ = writeln!(io::stderr(), "{}", error);
                             }
                         },
                     }
@@ -170,7 +162,7 @@ impl Shell {
             match child.wait() {
                 Ok(_) => {}
                 Err(err) => {
-                    writeln!(io::stderr(), "{}", err.to_string());
+                    let _ = writeln!(io::stderr(), "{}", err.to_string());
                 }
             };
         }
