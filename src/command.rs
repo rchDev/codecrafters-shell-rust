@@ -149,7 +149,8 @@ impl PartialToken {
             Self::Type => {
                 let inner_commands: Vec<Command> = args
                     .iter()
-                    .flat_map(|arg| Command::parse(arg, external_commands).commands)
+                    .filter_map(|arg| Command::parse(arg, external_commands).ok())
+                    .flat_map(|cr| cr.into_commands())
                     .collect();
                 FinalToken::Command(Command::Type(inner_commands))
             }
@@ -326,6 +327,10 @@ impl<'a> CommandResult<'a> {
             .zip(self.stdout_redirects.iter())
             .zip(self.stderr_redirects.iter())
             .map(|((cmd, stdout), stderr)| (cmd, stdout, stderr))
+    }
+
+    pub fn into_commands(self) -> Vec<Command> {
+        self.commands
     }
 }
 

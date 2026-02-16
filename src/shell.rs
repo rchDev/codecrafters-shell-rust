@@ -45,11 +45,10 @@ impl Shell {
 
         let mut child_process_wait_list: Vec<Child> = Vec::with_capacity(4);
 
-        let mut commands_iter = command_result.commands_with_redirects().peekable();
+        let mut commands_iter = command_result.commands_with_redirects();
         let mut prev_out: Option<Box<dyn Read + Send>> = None;
 
         while let Some((command, out_redirect, err_redirect)) = commands_iter.next() {
-            let is_last = &commands_iter.peek().is_none();
             match command {
                 Command::External { exec_path, args } => {
                     let filename = exec_path
