@@ -253,19 +253,21 @@ impl Shell {
             },
             Command::History(limit) => {
                 const AVG_COMMAND_SIZE: usize = 20;
-                let command_limit = if let Some(count) = *limit {
+                let history_len = self.history.previous_user_input.len();
+                let elems_to_take = if let Some(count) = *limit {
                     count
                 } else {
-                    self.history.previous_user_input.len()
+                    history_len
                 };
 
-                let mut result = String::with_capacity(command_limit * AVG_COMMAND_SIZE);
+                let mut result = String::with_capacity(elems_to_take * AVG_COMMAND_SIZE);
+                let elem_limit = history_len.saturating_sub(elems_to_take);
                 for (i, input) in self
                     .history
                     .previous_user_input
                     .iter()
-                    .take(command_limit)
                     .enumerate()
+                    .skip(elem_limit)
                 {
                     result += &format!("    {}  {input}\n", i + 1);
                 }
