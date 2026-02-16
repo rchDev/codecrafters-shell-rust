@@ -5,6 +5,7 @@ use crate::command::{CommandResult, StdErrRedirect, StdOutRedirect};
 
 use std::{
     env,
+    fs::File,
     io::{self, Cursor, Read, Write},
     path::PathBuf,
     process::{self, Child, Command as StdProcCmd, Stdio},
@@ -26,6 +27,23 @@ impl Shell {
         }
     }
 
+    fn open_redirect_files(
+        stdout_redirect: &StdOutRedirect,
+        stderr_redirect: &StdErrRedirect,
+    ) -> (Option<File>, Option<File>) {
+        let stdout_handle = match stdout_redirect {
+            StdOutRedirect::File { file_path, options } => options.open(&file_path).ok(),
+            _ => None,
+        };
+
+        let stderr_handle: Option<File> = match stderr_redirect {
+            StdErrRedirect::File { file_path, options } => options.open(&file_path).ok(),
+            _ => None,
+        };
+
+        (stdout_handle, stderr_handle)
+    }
+
     pub fn apply_commands(&mut self, command_result: Result<CommandResult, io::Error>) {
         let command_result = match command_result {
             Ok(result) => result,
@@ -41,6 +59,7 @@ impl Shell {
         let mut prev_out: Option<Box<dyn Read + Send>> = None;
 
         while let Some((command, out_redirect, err_redirect)) = commands_iter.next() {
+            let (out_handle, err_handle) = Shell::open_redirect_files(out_redirect, err_redirect);
             match command {
                 Command::External { exec_path, args } => {
                     let filename = exec_path
@@ -117,40 +136,48 @@ impl Shell {
                                 prev_out = Some(Box::new(Cursor::new(builtin_result)));
                             }
                             StdOutRedirect::None => {
-                                let _ = writeln!(io::stdout(), "{}", builtin_result);
+                                if !builtin_result.is_empty() {
+                                    let _ = writeln!(io::stdout(), "{}", builtin_result);
+                                }
                             }
-                            StdOutRedirect::File { file_path, options } => {
-                                match options.open(&file_path) {
-                                    Ok(mut file_handle) => {
-                                        let _ = writeln!(file_handle, "{}", builtin_result);
+                            StdOutRedirect::File { .. } => match out_handle {
+                                Some(mut handle) => {
+                                    if !builtin_result.is_empty() {
+                                        let _ = writeln!(handle, "{}", builtin_result);
                                     }
-                                    Err(_) => {
-                                        let _ = writeln!(
-                                            io::stdout(),
+                                }
+                                None => {
+                                    if !builtin_result.is_empty() {
+                                        let _ = write!(
+                                            io::stderr(),
                                             "failed to open file for stdout redirection:\n{}",
                                             builtin_result
                                         );
                                     }
-                                };
-                            }
+                                }
+                            },
                         },
                         Err(error) => match err_redirect {
-                            StdErrRedirect::File { file_path, options } => {
-                                match options.open(&file_path) {
-                                    Ok(mut file_handle) => {
-                                        let _ = writeln!(file_handle, "{}", error);
+                            StdErrRedirect::File { .. } => match err_handle {
+                                Some(mut handle) => {
+                                    if !error.is_empty() {
+                                        let _ = write!(handle, "{}\n", error);
                                     }
-                                    Err(_) => {
-                                        let _ = writeln!(
+                                }
+                                None => {
+                                    if !error.is_empty() {
+                                        let _ = write!(
                                             io::stderr(),
                                             "failed to open file for stderr redirection:\n{}",
                                             error
                                         );
                                     }
                                 }
-                            }
+                            },
                             StdErrRedirect::None => {
-                                let _ = writeln!(io::stderr(), "{}", error);
+                                if !error.is_empty() {
+                                    let _ = writeln!(io::stderr(), "{}", error);
+                                }
                             }
                         },
                     }
