@@ -56,6 +56,7 @@ pub enum HistoryParam {
     None,
     Limit(Option<usize>),
     ReadFromFile(PathBuf),
+    WriteToFile(PathBuf),
 }
 
 #[derive(Debug, PartialEq)]
@@ -133,9 +134,19 @@ impl PartialToken {
                         let count = count.parse::<usize>().ok();
                         FinalToken::Command(Command::History(HistoryParam::Limit(count)))
                     }
-                    (Some(_), Some(file_path)) => FinalToken::Command(Command::History(
-                        HistoryParam::ReadFromFile(PathBuf::from(file_path)),
-                    )),
+                    (Some(arg), Some(file_path)) => {
+                        if *arg == "-r" {
+                            FinalToken::Command(Command::History(HistoryParam::ReadFromFile(
+                                PathBuf::from(file_path),
+                            )))
+                        } else if *arg == "-w" {
+                            FinalToken::Command(Command::History(HistoryParam::WriteToFile(
+                                PathBuf::from(file_path),
+                            )))
+                        } else {
+                            FinalToken::Command(Command::History(HistoryParam::None))
+                        }
+                    }
                 }
             }
             Self::StdOutRedirect => {
@@ -307,6 +318,9 @@ impl fmt::Display for Command {
                 HistoryParam::None => write!(f, "history"),
                 HistoryParam::ReadFromFile(file_path) => {
                     write!(f, "history -r {}", file_path.display())
+                }
+                HistoryParam::WriteToFile(file_path) => {
+                    write!(f, "history -w {}", file_path.display())
                 }
             },
             Command::External { exec_path, .. } => {

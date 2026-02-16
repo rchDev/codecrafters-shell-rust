@@ -86,9 +86,16 @@ impl History for CommandHistory {
 
         rustyline::Result::Ok(())
     }
-    fn save(&mut self, _path: &std::path::Path) -> rustyline::Result<()> {
+
+    fn save(&mut self, path: &std::path::Path) -> rustyline::Result<()> {
+        let mut file_handle = OpenOptions::new().create(true).write(true).open(path)?;
+        for entry in &self.previous_user_input {
+            file_handle.write(format!("{}\n", entry).as_bytes())?;
+        }
+
         rustyline::Result::Ok(())
     }
+
     fn search(
         &self,
         _term: &str,
@@ -354,6 +361,10 @@ impl Shell {
                 }
                 HistoryParam::ReadFromFile(file_path) => {
                     let _ = history.load(file_path.as_path());
+                    Ok("".to_string())
+                }
+                HistoryParam::WriteToFile(file_path) => {
+                    let _ = history.save(file_path.as_path());
                     Ok("".to_string())
                 }
             },
