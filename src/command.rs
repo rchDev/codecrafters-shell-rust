@@ -14,7 +14,7 @@ use std::{
 use crate::command::meta::MetaSymbolExpander;
 
 pub const BUILTIN_COMMAND_NAMES: &[&str] = &[
-    "exit", "echo", "type", "pwd", "cd", ">", "1>", "2>", ">>", "1>>", "2>>", "|",
+    "exit", "echo", "type", "pwd", "cd", "history", ">", "1>", "2>", ">>", "1>>", "2>>", "|",
 ];
 
 #[derive(Debug, Clone)]
@@ -43,6 +43,7 @@ pub enum Command {
     Type(Vec<Command>),
     Pwd,
     Cd(PathBuf),
+    History,
     External {
         exec_path: PathBuf,
         args: Vec<String>,
@@ -57,6 +58,7 @@ enum PartialToken {
     Type,
     Pwd,
     Cd,
+    History,
     StdOutRedirect,
     StdOutRedirectAppend,
     StdErrRedirect,
@@ -84,6 +86,7 @@ impl PartialToken {
             "type" => Self::Type,
             "pwd" => Self::Pwd,
             "cd" => Self::Cd,
+            "history" => Self::History,
             other => Self::Unknown(other.to_string()),
         }
     }
@@ -104,7 +107,7 @@ impl PartialToken {
 
     fn into_final(
         &self,
-        args: &Vec<String>,
+        args: &Vec<&str>,
         external_commands: &HashMap<OsString, PathBuf>,
     ) -> FinalToken {
         match self {
@@ -112,6 +115,7 @@ impl PartialToken {
             Self::Echo => FinalToken::Command(Command::Echo(args.join(" "))),
             Self::Pwd => FinalToken::Command(Command::Pwd),
             Self::Cd => FinalToken::Command(Command::Cd(PathBuf::from(args.join("")))),
+            Self::History => FinalToken::Command(Command::History),
             Self::StdOutRedirect => {
                 let mut options = OpenOptions::new();
                 options.create(true).write(true).truncate(true);
@@ -150,7 +154,7 @@ impl PartialToken {
                 let inner_commands: Vec<Command> = args
                     .iter()
                     .filter_map(|arg| Command::parse(arg, external_commands).ok())
-                    .flat_map(|cr| cr.into_commands())
+                    .flat_map(|cr| cr.iter.into_commands())
                     .collect();
                 FinalToken::Command(Command::Type(inner_commands))
             }
@@ -159,7 +163,7 @@ impl PartialToken {
                 if let Some(path) = exec_path {
                     FinalToken::Command(Command::External {
                         exec_path: path.clone(),
-                        args: args.iter().map(|arg| String::from(arg)).collect(),
+                        args: args.iter().map(|arg| String::from(*arg)).collect(),
                     })
                 } else {
                     FinalToken::Command(Command::None(value.clone()))
@@ -170,21 +174,38 @@ impl PartialToken {
 }
 
 impl Command {
-    pub fn parse<'a>(
-        input: &'a str,
+    pub fn parse(
+        input: &str,
         external_commands: &HashMap<OsString, PathBuf>,
-    ) -> Result<CommandResult<'a>, io::Error> {
+    ) -> Result<CommandResult, io::Error> {
         let trimmed_input = input.trim();
         let tokens_iter = MetaSymbolExpander::new(trimmed_input.chars());
 
-        const INITIAL_CAPACITY: usize = 10;
-        let mut commands = Vec::with_capacity(INITIAL_CAPACITY);
-        let mut stdout_redirects = Vec::with_capacity(INITIAL_CAPACITY);
-        let mut stderr_redirects = Vec::with_capacity(INITIAL_CAPACITY);
+        let command_tokens: Vec<String> = tokens_iter.collect();
 
-        let (mut current_partial, mut current_args) = (None::<PartialToken>, Vec::new());
+        let command_iter = Self::parse_from_tokens(&command_tokens, external_commands)?;
 
-        for token in tokens_iter {
+        Ok(CommandResult {
+            iter: command_iter,
+            metadata: CommandMetaData {
+                input: input.to_string(),
+                command_tokens,
+            },
+        })
+    }
+
+    pub fn parse_from_tokens(
+        command_tokens: &[String],
+        external_commands: &HashMap<OsString, PathBuf>,
+    ) -> Result<CommandIter, io::Error> {
+        let mut commands = Vec::with_capacity(command_tokens.len());
+        let mut stdout_redirects = Vec::with_capacity(command_tokens.len());
+        let mut stderr_redirects = Vec::with_capacity(command_tokens.len());
+
+        let (mut current_partial, mut current_args): (Option<PartialToken>, Vec<&str>) =
+            (None::<PartialToken>, Vec::new());
+
+        for token in command_tokens {
             if current_partial.is_none() {
                 current_partial = Some(PartialToken::parse(&token));
                 continue;
@@ -240,8 +261,7 @@ impl Command {
             }
         }
 
-        Ok(CommandResult {
-            input: trimmed_input,
+        Ok(CommandIter {
             stdout_redirects,
             stderr_redirects,
             commands,
@@ -257,6 +277,7 @@ impl fmt::Display for Command {
             Command::Echo(_) => write!(f, "echo"),
             Command::Cd(_) => write!(f, "cd"),
             Command::Type(_) => write!(f, "type"),
+            Command::History => write!(f, "history"),
             Command::External { exec_path, .. } => {
                 write!(
                     f,
@@ -313,15 +334,26 @@ pub fn get_external_commands(path: OsString) -> HashMap<OsString, PathBuf> {
     executables
 }
 
-#[derive(Debug)]
-pub struct CommandResult<'a> {
-    input: &'a str,
+#[derive(Debug, Clone)]
+pub struct CommandResult {
+    pub metadata: CommandMetaData,
+    pub iter: CommandIter,
+}
+
+#[derive(Debug, Clone)]
+pub struct CommandMetaData {
+    pub input: String,
+    pub command_tokens: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CommandIter {
     commands: Vec<Command>,
     stdout_redirects: Vec<StdOutRedirect>,
     stderr_redirects: Vec<StdErrRedirect>,
 }
 
-impl<'a> CommandResult<'a> {
+impl CommandIter {
     pub fn commands(&self) -> std::slice::Iter<'_, Command> {
         self.commands.iter()
     }

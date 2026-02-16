@@ -4,6 +4,7 @@ pub use crate::command::completer::CommandCompleter;
 use crate::command::{CommandResult, StdErrRedirect, StdOutRedirect};
 
 use std::{
+    collections::HashMap,
     env,
     fs::File,
     io::{self, Cursor, Read, Write},
@@ -11,9 +12,26 @@ use std::{
     process::{self, Child, Command as StdProcCmd, Stdio},
 };
 
+pub struct CommandHistory {
+    previous_user_input: Vec<String>,
+    input_to_command_tokens: HashMap<String, Vec<String>>,
+}
+
+impl CommandHistory {
+    fn new(history_size: usize) -> CommandHistory {
+        CommandHistory {
+            previous_user_input: Vec::with_capacity(history_size),
+            input_to_command_tokens: HashMap::with_capacity(history_size),
+        }
+    }
+}
+
 pub struct Shell {
     working_dir: PathBuf,
+    history: CommandHistory,
 }
+
+pub const SHELL_DEFAULT_HISTORY_SIZE: usize = 256;
 
 impl Shell {
     /// Creates a new Shell object
@@ -24,7 +42,24 @@ impl Shell {
     pub fn new() -> Self {
         Self {
             working_dir: env::current_dir().unwrap(),
+            history: CommandHistory::new(SHELL_DEFAULT_HISTORY_SIZE),
         }
+    }
+
+    pub fn set_history_size(size: usize) {
+        unimplemented!();
+    }
+
+    fn add_history_entry(&mut self, cr: &CommandResult) -> Result<(), &'static str> {
+        let input = cr.metadata.input.clone();
+        self.history.previous_user_input.push(input.clone());
+
+        let input_tokens = cr.metadata.command_tokens.clone();
+        self.history
+            .input_to_command_tokens
+            .insert(input.clone(), input_tokens);
+
+        Ok(())
     }
 
     fn open_redirect_files(
@@ -53,9 +88,15 @@ impl Shell {
             }
         };
 
-        let mut child_process_wait_list: Vec<Child> = Vec::with_capacity(4);
+        match self.add_history_entry(&command_result) {
+            Ok(()) => {}
+            Err(_) => {
+                panic!("failed to add history entry");
+            }
+        };
 
-        let mut commands_iter = command_result.commands_with_redirects();
+        let mut child_process_wait_list: Vec<Child> = Vec::with_capacity(4);
+        let mut commands_iter = command_result.iter.commands_with_redirects();
         let mut prev_out: Option<Box<dyn Read + Send>> = None;
 
         while let Some((command, out_redirect, err_redirect)) = commands_iter.next() {
@@ -210,10 +251,20 @@ impl Shell {
                     exec_path.display()
                 )),
             },
+            Command::History => {
+                const AVG_COMMAND_SIZE: usize = 20;
+                let mut result = String::with_capacity(
+                    self.history.previous_user_input.capacity() * AVG_COMMAND_SIZE,
+                );
+                for (i, input) in self.history.previous_user_input.iter().enumerate() {
+                    result += &format!("    {}  {input}\n", i + 1);
+                }
+                Ok(result)
+            }
             Command::Echo(msg) => Ok(format!("{msg}\n")),
             Command::Type(inner_commands) => {
                 let mut result = String::with_capacity(256);
-                for (index, command) in inner_commands.iter().enumerate() {
+                for command in inner_commands {
                     match command {
                         Command::None(name) => {
                             result += &format!("{name}: not found\n");
@@ -229,7 +280,7 @@ impl Shell {
                         builtin => result += &format!("{builtin} is a shell builtin\n"),
                     }
                 }
-                return Ok(result);
+                Ok(result)
             }
             Command::Pwd => Ok(format!("{}\n", self.working_dir.display())),
             Command::Exit => {
