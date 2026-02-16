@@ -284,10 +284,6 @@ pub fn get_external_commands(path: OsString) -> HashMap<OsString, PathBuf> {
                 Err(_) => continue,
             };
 
-            // if entry.file_name().eq_ignore_ascii_case("cat") {
-            //     println!("{:?}", &dir);
-            //     println!("\t{:?}", &entry);
-            // }
             let metadata = match entry.metadata() {
                 Ok(meta) => meta,
                 Err(_) => continue,
