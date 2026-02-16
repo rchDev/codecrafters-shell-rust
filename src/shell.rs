@@ -251,12 +251,22 @@ impl Shell {
                     exec_path.display()
                 )),
             },
-            Command::History => {
+            Command::History(limit) => {
                 const AVG_COMMAND_SIZE: usize = 20;
-                let mut result = String::with_capacity(
-                    self.history.previous_user_input.capacity() * AVG_COMMAND_SIZE,
-                );
-                for (i, input) in self.history.previous_user_input.iter().enumerate() {
+                let command_limit = if let Some(count) = *limit {
+                    count
+                } else {
+                    self.history.previous_user_input.len()
+                };
+
+                let mut result = String::with_capacity(command_limit * AVG_COMMAND_SIZE);
+                for (i, input) in self
+                    .history
+                    .previous_user_input
+                    .iter()
+                    .take(command_limit)
+                    .enumerate()
+                {
                     result += &format!("    {}  {input}\n", i + 1);
                 }
                 Ok(result)

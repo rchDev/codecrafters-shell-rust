@@ -43,7 +43,7 @@ pub enum Command {
     Type(Vec<Command>),
     Pwd,
     Cd(PathBuf),
-    History,
+    History(Option<usize>),
     External {
         exec_path: PathBuf,
         args: Vec<String>,
@@ -115,7 +115,10 @@ impl PartialToken {
             Self::Echo => FinalToken::Command(Command::Echo(args.join(" "))),
             Self::Pwd => FinalToken::Command(Command::Pwd),
             Self::Cd => FinalToken::Command(Command::Cd(PathBuf::from(args.join("")))),
-            Self::History => FinalToken::Command(Command::History),
+            Self::History => {
+                let count = args.first().and_then(|str| str.parse::<usize>().ok());
+                FinalToken::Command(Command::History(count))
+            }
             Self::StdOutRedirect => {
                 let mut options = OpenOptions::new();
                 options.create(true).write(true).truncate(true);
@@ -277,7 +280,10 @@ impl fmt::Display for Command {
             Command::Echo(_) => write!(f, "echo"),
             Command::Cd(_) => write!(f, "cd"),
             Command::Type(_) => write!(f, "type"),
-            Command::History => write!(f, "history"),
+            Command::History(count) => match count {
+                Some(val) => write!(f, "history {val}"),
+                None => write!(f, "history"),
+            },
             Command::External { exec_path, .. } => {
                 write!(
                     f,
