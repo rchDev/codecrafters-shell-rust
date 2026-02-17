@@ -14,14 +14,14 @@ use std::{
 };
 
 pub struct CommandHistory {
-    index: usize,
+    synced_index: usize,
     previous_user_input: Vec<String>,
 }
 
 impl CommandHistory {
     pub fn new() -> CommandHistory {
         CommandHistory {
-            index: 0,
+            synced_index: 0,
             previous_user_input: Vec::with_capacity(SHELL_DEFAULT_HISTORY_SIZE),
         }
     }
@@ -36,12 +36,27 @@ impl History for CommandHistory {
         self.previous_user_input.push(line);
         rustyline::Result::Ok(true)
     }
-    fn append(&mut self, _path: &std::path::Path) -> rustyline::Result<()> {
+
+    fn append(&mut self, path: &std::path::Path) -> rustyline::Result<()> {
+        let mut file_handle = OpenOptions::new().create(true).append(true).open(path)?;
+
+        let in_mem_history_len = self.previous_user_input.len();
+        let skip_amount = in_mem_history_len - (in_mem_history_len - self.synced_index);
+
+        for entry in self.previous_user_input.iter().skip(skip_amount) {
+            file_handle.write(format!("{}\n", entry).as_bytes())?;
+        }
+        self.synced_index = self.previous_user_input.len();
+
         rustyline::Result::Ok(())
     }
+
     fn clear(&mut self) -> rustyline::Result<()> {
-        self.previous_user_input.clear();
-        self.index = 0;
+        if let Some(last) = self.previous_user_input.pop() {
+            self.previous_user_input.clear();
+            self.previous_user_input.push(last);
+            self.synced_index = 1;
+        }
         rustyline::Result::Ok(())
     }
     fn get(
@@ -75,6 +90,7 @@ impl History for CommandHistory {
         self.previous_user_input.len()
     }
     fn load(&mut self, path: &std::path::Path) -> rustyline::Result<()> {
+        self.clear()?;
         let file_handle = OpenOptions::new().read(true).open(path)?;
 
         let reader = BufReader::new(file_handle);
@@ -83,6 +99,7 @@ impl History for CommandHistory {
                 self.add_owned(line)?;
             }
         }
+        self.synced_index = self.previous_user_input.len();
 
         rustyline::Result::Ok(())
     }
@@ -365,6 +382,10 @@ impl Shell {
                 }
                 HistoryParam::WriteToFile(file_path) => {
                     let _ = history.save(file_path.as_path());
+                    Ok("".to_string())
+                }
+                HistoryParam::AppendToFile(file_path) => {
+                    let _ = history.append(file_path.as_path());
                     Ok("".to_string())
                 }
             },

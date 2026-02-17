@@ -57,6 +57,7 @@ pub enum HistoryParam {
     Limit(Option<usize>),
     ReadFromFile(PathBuf),
     WriteToFile(PathBuf),
+    AppendToFile(PathBuf),
 }
 
 #[derive(Debug, PartialEq)]
@@ -141,6 +142,10 @@ impl PartialToken {
                             )))
                         } else if *arg == "-w" {
                             FinalToken::Command(Command::History(HistoryParam::WriteToFile(
+                                PathBuf::from(file_path),
+                            )))
+                        } else if *arg == "-a" {
+                            FinalToken::Command(Command::History(HistoryParam::AppendToFile(
                                 PathBuf::from(file_path),
                             )))
                         } else {
@@ -321,6 +326,9 @@ impl fmt::Display for Command {
                 }
                 HistoryParam::WriteToFile(file_path) => {
                     write!(f, "history -w {}", file_path.display())
+                }
+                HistoryParam::AppendToFile(file_path) => {
+                    write!(f, "history -a {}", file_path.display())
                 }
             },
             Command::External { exec_path, .. } => {
