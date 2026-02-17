@@ -7,6 +7,7 @@ use rustyline::history::History;
 use std::{
     borrow::Cow,
     env,
+    ffi::OsString,
     fs::{File, OpenOptions},
     io::{self, BufRead, BufReader, Cursor, Read, Write},
     path::PathBuf,
@@ -15,15 +16,22 @@ use std::{
 
 pub struct CommandHistory {
     synced_index: usize,
+    history_file_path: PathBuf,
     previous_user_input: Vec<String>,
 }
 
 impl CommandHistory {
-    pub fn new() -> CommandHistory {
+    pub fn new(history_file_path: OsString) -> CommandHistory {
         CommandHistory {
             synced_index: 0,
+            history_file_path: PathBuf::from(history_file_path),
             previous_user_input: Vec::with_capacity(SHELL_DEFAULT_HISTORY_SIZE),
         }
+    }
+
+    pub fn load_from_history_file(&mut self) {
+        let file_path = self.history_file_path.clone();
+        let _ = self.load(file_path.as_path());
     }
 }
 

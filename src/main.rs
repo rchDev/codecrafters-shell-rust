@@ -8,6 +8,10 @@ use std::io::{self, Write, stdin};
 
 fn main() -> Result<()> {
     let path = std::env::var_os("PATH").unwrap_or_default();
+    let history_file_path = std::env::var_os("HISTFILE").unwrap_or_default();
+
+    let mut command_history = CommandHistory::new(history_file_path);
+    command_history.load_from_history_file();
     let external_commands = command::get_external_commands(path);
     let command_names: Vec<String> = external_commands
         .keys()
@@ -26,7 +30,7 @@ fn main() -> Result<()> {
         .build();
 
     let mut rl: Editor<CommandCompleter, CommandHistory> =
-        Editor::with_history(config, CommandHistory::new())?;
+        Editor::with_history(config, command_history)?;
 
     rl.set_helper(Some(autocompleter));
 
