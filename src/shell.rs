@@ -33,6 +33,11 @@ impl CommandHistory {
         let file_path = self.history_file_path.clone();
         let _ = self.load(file_path.as_path());
     }
+
+    pub fn save_to_history_file(&mut self) {
+        let file_path = self.history_file_path.clone();
+        let _ = self.save(file_path.as_path());
+    }
 }
 
 impl History for CommandHistory {
@@ -420,6 +425,7 @@ impl Shell {
             }
             Command::Pwd => Ok(format!("{}\n", self.working_dir.display())),
             Command::Exit => {
+                history.save_to_history_file();
                 process::exit(0);
             }
             Command::None(cmd_name) => Err(format!("{cmd_name}: command not found\n")),
